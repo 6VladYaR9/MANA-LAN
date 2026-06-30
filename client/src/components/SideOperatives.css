@@ -1,0 +1,37 @@
+.sideOperatives {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.sideOperative {
+  position: fixed;
+  bottom: -4vh;
+  width: clamp(220px, 25vw, 430px);
+  max-height: 90vh;
+  object-fit: contain;
+  opacity: 0.42;
+  filter: saturate(0.92) contrast(1.08) brightness(0.7);
+  mask-image: linear-gradient(180deg, #000 0%, #000 52%, rgba(0,0,0,.82) 68%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 52%, rgba(0,0,0,.82) 68%, transparent 100%);
+}
+
+.sideOperativeLeft {
+  left: max(-92px, calc((100vw - var(--app-width, 940px)) / 2 - 310px));
+}
+
+.sideOperativeRight {
+  right: max(-94px, calc((100vw - var(--app-width, 940px)) / 2 - 315px));
+}
+
+@media (max-width: 1180px) {
+  .sideOperative { opacity: 0.22; }
+  .sideOperativeLeft { left: -150px; }
+  .sideOperativeRight { right: -150px; }
+}
+
+@media (max-width: 760px) {
+  .sideOperatives { display: none; }
+}

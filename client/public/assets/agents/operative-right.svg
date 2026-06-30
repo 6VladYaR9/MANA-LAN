@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="900" viewBox="0 0 480 900" role="img" aria-label="MANA operative right">
+  <defs>
+    <linearGradient id="g" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a3129"/>
+      <stop offset=".5" stop-color="#151313"/>
+      <stop offset="1" stop-color="#050505"/>
+    </linearGradient>
+    <linearGradient id="o" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff5a2b"/>
+      <stop offset="1" stop-color="#b91f08"/>
+    </linearGradient>
+    <filter id="s" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="24" stdDeviation="22" flood-color="#000" flood-opacity=".78"/></filter>
+  </defs>
+  <g filter="url(#s)">
+    <path d="M233 55c-54 0-93 43-88 96l8 78c4 40 38 72 80 72s76-32 80-72l8-78c5-53-34-96-88-96z" fill="url(#g)"/>
+    <path d="M155 139h154l-16 58H171z" fill="#0b0b0b" opacity=".9"/>
+    <path d="M172 157h120v18H172z" fill="#f5d22c" opacity=".75"/>
+    <path d="M126 306h214c34 0 62 28 62 62v188c0 53-43 96-96 96H161c-53 0-96-43-96-96V368c0-34 27-62 61-62z" fill="url(#g)"/>
+    <path d="M127 333h215v83H127z" fill="#0a0a0a" opacity=".55"/>
+    <path d="M171 347h126v32H171z" fill="url(#o)"/>
+    <path d="M56 389c-43 37-55 93-36 169l28 111 71-19-30-142c-8-39 3-70 34-93z" fill="#181615"/>
+    <path d="M397 386c46 36 61 92 45 169l-23 112-72-16 24-143c7-39-6-70-38-91z" fill="#181615"/>
+    <path d="M136 644h82v218h-94zM249 644h83l38 218h-98z" fill="#111"/>
+    <path d="M134 852h110v34H115c-14 0-25-11-25-25v-9zM265 852h116v34H263z" fill="#070707"/>
+    <path d="M187 417h92v35h-92z" fill="#f5d22c" opacity=".72"/>
+    <path d="M210 417h24v35h-24z" fill="#111" opacity=".9"/>
+  </g>
+</svg>

@@ -1,0 +1,32 @@
+.roomFloatingChat {
+  left: 18px;
+  bottom: 18px;
+}
+
+.roomFloatingChatWindow {
+  width: min(480px, calc(100vw - 28px));
+}
+
+.roomFloatingChatWindow header b {
+  max-width: 340px;
+  font-size: 18px;
+  line-height: 1.05;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roomFloatingChatButton {
+  min-width: 148px;
+}
+
+@media (max-width: 560px) {
+  .roomFloatingChat {
+    left: 10px;
+    bottom: 10px;
+  }
+
+  .roomFloatingChatWindow header b {
+    max-width: 230px;
+  }
+}

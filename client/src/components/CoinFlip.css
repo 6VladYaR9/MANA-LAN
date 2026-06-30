@@ -1,0 +1,116 @@
+.coinOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  gap: 18px;
+  align-content: center;
+  background:
+    radial-gradient(circle at center, rgba(255, 213, 30, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(0,0,0,.84), rgba(0,0,0,.95));
+  animation: coinOverlayOut 7.75s ease forwards;
+}
+
+.coinScene {
+  width: 156px;
+  height: 156px;
+  perspective: 1000px;
+}
+
+.coin {
+  width: 156px;
+  height: 156px;
+  position: relative;
+  transform-style: preserve-3d;
+  animation: coinThrowL 2.5s cubic-bezier(.16,.84,.23,1.08) forwards;
+}
+
+.coin.final-r { animation-name: coinThrowR; }
+
+.coinFace {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 30% 22%, #fff7b1 0 7%, transparent 8%),
+    linear-gradient(135deg, #ffe869, #e1a217 56%, #805706);
+  border: 8px solid #ffdc2f;
+  color: #15120c;
+  font-family: var(--font-display);
+  font-size: 58px;
+  font-weight: 900;
+  text-shadow: 0 1px rgba(255,255,255,.48);
+  box-shadow: 0 24px 60px rgba(0,0,0,.64), inset 0 0 0 5px rgba(0,0,0,.24);
+  backface-visibility: hidden;
+}
+
+.coinBack {
+  transform: rotateY(180deg);
+}
+
+.coinText {
+  display: grid;
+  gap: 5px;
+  text-align: center;
+  text-transform: uppercase;
+  opacity: 0;
+  transform: translateY(10px) scale(.96);
+  transition: opacity .28s ease, transform .28s ease;
+}
+
+.coinText.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.coinText span {
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 25px;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+}
+
+.coinText b {
+  color: var(--mana-yellow);
+  font-family: var(--font-display);
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
+.coinText small {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+/*
+  Финальные кадры зафиксированы на нужной стороне без дополнительного
+  переворота: L заканчивается на rotateY(1440deg), R — на rotateY(1620deg).
+  rotateX тоже заканчивается кратно 360, поэтому монетка не показывает обратную сторону в самом конце.
+*/
+@keyframes coinThrowL {
+  0% { transform: translateY(120px) rotateX(0deg) rotateY(0deg) scale(.72); }
+  28% { transform: translateY(-98px) rotateX(720deg) rotateY(540deg) scale(1.08); }
+  58% { transform: translateY(8px) rotateX(1080deg) rotateY(1080deg) scale(1); }
+  72% { transform: translateY(0) rotateX(1440deg) rotateY(1440deg) scale(1); }
+  100% { transform: translateY(0) rotateX(1440deg) rotateY(1440deg) scale(1); }
+}
+
+@keyframes coinThrowR {
+  0% { transform: translateY(120px) rotateX(0deg) rotateY(0deg) scale(.72); }
+  28% { transform: translateY(-98px) rotateX(720deg) rotateY(540deg) scale(1.08); }
+  58% { transform: translateY(8px) rotateX(1080deg) rotateY(1080deg) scale(1); }
+  72% { transform: translateY(0) rotateX(1440deg) rotateY(1620deg) scale(1); }
+  100% { transform: translateY(0) rotateX(1440deg) rotateY(1620deg) scale(1); }
+}
+
+@keyframes coinOverlayOut {
+  0%, 94% { opacity: 1; visibility: visible; }
+  100% { opacity: 0; visibility: hidden; }
+}
