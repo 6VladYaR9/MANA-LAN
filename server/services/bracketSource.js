@@ -18,6 +18,47 @@ const FALLBACK_ROWS = [
   ['Финал (BO3)', '', '7', '4', '14-17', '', '', '21-00']
 ];
 
+let cachedBracket = null;
+
+function readPositiveIntEnv(key, fallback) {
+  const value = Number.parseInt(process.env[key] || '', 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function getFetchTimeoutMs() {
+  return readPositiveIntEnv('BRACKET_FETCH_TIMEOUT_MS', 3000);
+}
+
+function getCacheTtlMs() {
+  return readPositiveIntEnv('BRACKET_CACHE_TTL_MS', 60000);
+}
+
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), getFetchTimeoutMs());
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error(`Google Sheets fetch timed out after ${getFetchTimeoutMs()}ms`);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function cloneBracket(bracket, extras = {}) {
+  return {
+    ...bracket,
+    ...extras,
+    stages: bracket.stages,
+    rows: bracket.rows.map((row) => [...row])
+  };
+}
+
 function loadDotEnv() {
   const envPath = path.join(__dirname, '..', '.env');
   if (!fs.existsSync(envPath)) return;
@@ -112,13 +153,13 @@ function sheetsValuesUrl() {
 }
 
 async function fetchText(url) {
-  const response = await fetch(url, { headers: { 'User-Agent': 'MANA-CS2-Match-Hub/1.0' } });
+  const response = await fetchWithTimeout(url, { headers: { 'User-Agent': 'MANA-CS2-Match-Hub/1.0' } });
   if (!response.ok) throw new Error(`Google Sheets вернул HTTP ${response.status}`);
   return response.text();
 }
 
 async function fetchJson(url) {
-  const response = await fetch(url, { headers: { 'User-Agent': 'MANA-CS2-Match-Hub/1.0' } });
+  const response = await fetchWithTimeout(url, { headers: { 'User-Agent': 'MANA-CS2-Match-Hub/1.0' } });
   if (!response.ok) throw new Error(`Google Sheets API вернул HTTP ${response.status}`);
   return response.json();
 }
@@ -130,7 +171,7 @@ function buildPublicCsvUrlFromSheetId() {
   return `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/export?format=csv&gid=${encodeURIComponent(gid)}`;
 }
 
-async function getBracketRows() {
+async function loadBracketRowsUncached() {
   const publicCsvUrl = process.env.GOOGLE_SHEETS_PUBLIC_CSV_URL || buildPublicCsvUrlFromSheetId();
 
   if (publicCsvUrl) {
@@ -160,6 +201,31 @@ async function getBracketRows() {
     rows: FALLBACK_ROWS,
     updatedAt: new Date().toISOString()
   };
+}
+
+async function getBracketRows() {
+  const cacheTtl = getCacheTtlMs();
+
+  if (cachedBracket && Date.now() - cachedBracket.cachedAt < cacheTtl) {
+    return cloneBracket(cachedBracket.bracket, { cached: true });
+  }
+
+  try {
+    const bracket = await loadBracketRowsUncached();
+    cachedBracket = {
+      cachedAt: Date.now(),
+      bracket
+    };
+    return cloneBracket(bracket, { cached: false });
+  } catch (error) {
+    if (!cachedBracket) throw error;
+
+    return cloneBracket(cachedBracket.bracket, {
+      cached: true,
+      stale: true,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
 }
 
 module.exports = {

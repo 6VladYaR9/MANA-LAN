@@ -126,7 +126,7 @@ function AppRoutes({
         <Route path="/dota" element={<DotaDevelopment />} />
         <Route path="/room/:roomId" element={<Room nickname={nickname} isAdmin={isAdmin} adminToken={adminToken} onAdminLogout={onAdminLogout} />} />
         <Route path="/dota/room/:roomId" element={<DotaDevelopment />} />
-        <Route path="/bracket" element={<TournamentBracket game="cs2" isAdmin={isAdmin} onAdminLogout={onAdminLogout} />} />
+        <Route path="/bracket" element={<TournamentBracket game="cs2" isAdmin={isAdmin} adminToken={adminToken} onAdminLogout={onAdminLogout} />} />
         <Route path="/dota/bracket" element={<DotaDevelopment />} />
         <Route path="/past" element={<PastTournaments game="cs2" isAdmin={isAdmin} adminToken={adminToken} onAdminLogout={onAdminLogout} />} />
         <Route path="/dota/past" element={<DotaDevelopment />} />

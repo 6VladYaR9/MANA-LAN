@@ -54,6 +54,10 @@ function normalizeGame(value) {
   return GAMES.includes(value) ? value : 'cs2';
 }
 
+function clonePlain(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
 function cleanText(value, fallback) {
   const text = String(value || '').trim();
   return text || fallback;
@@ -87,17 +91,61 @@ function buildVetoActions(matchFormat, startingTeam) {
 }
 
 class RoomManager {
-  constructor() {
-    this.rooms = [];
+  constructor(snapshot = {}) {
+    const state = snapshot && typeof snapshot === 'object' ? snapshot : {};
+    this.rooms = Array.isArray(state.rooms) ? state.rooms.map((room) => this.hydrateRoom(room)).filter(Boolean) : [];
     this.allocatedServerIds = new Set();
-    this.globalMessages = [];
-    this.adminMessages = [];
-    this.adminLogs = [];
+    this.rooms.forEach((room) => {
+      if (room?.assignedServer?.id && !room.serverReleased) this.allocatedServerIds.add(room.assignedServer.id);
+    });
+    this.globalMessages = Array.isArray(state.globalMessages) ? state.globalMessages : [];
+    this.adminMessages = Array.isArray(state.adminMessages) ? state.adminMessages : [];
+    this.adminLogs = Array.isArray(state.adminLogs) ? state.adminLogs : [];
     this.chatCooldowns = new Map();
-    this.maintenanceMode = false;
-    this.pastTournaments = this.createDefaultPastTournaments();
+    this.maintenanceMode = Boolean(state.maintenanceMode);
+    this.pastTournaments = Array.isArray(state.pastTournaments) ? state.pastTournaments : this.createDefaultPastTournaments();
+    this.bracketStates = state.bracketStates && typeof state.bracketStates === 'object' ? state.bracketStates : {};
   }
 
+  hydrateRoom(room) {
+    if (!room || typeof room !== 'object' || !room.id) return null;
+
+    const matchFormat = normalizeMatchFormat(room.matchFormat);
+    const teamSize = normalizeTeamSize(room.teamSize);
+    const resultScreenshots = Array.isArray(room.resultScreenshots)
+      ? room.resultScreenshots
+      : (room.resultScreenshot ? [room.resultScreenshot] : []);
+
+    return {
+      ...room,
+      game: normalizeGame(room.game),
+      club: normalizeClub(room.club),
+      matchFormat,
+      targetMaps: Number.isFinite(Number(room.targetMaps)) ? Number(room.targetMaps) : (matchFormat === 'BO3' ? 3 : 1),
+      password: String(room.password || ''),
+      hasPassword: Boolean(room.hasPassword || room.password),
+      players: Array.isArray(room.players)
+        ? room.players.map((player) => ({ ...player, socketId: '', connected: false }))
+        : [],
+      captains: {
+        A: room.captains?.A || null,
+        B: room.captains?.B || null
+      },
+      teamSize,
+      maxPlayers: Number.isFinite(Number(room.maxPlayers)) ? Number(room.maxPlayers) : teamSize * 2,
+      selectedMaps: Array.isArray(room.selectedMaps) ? room.selectedMaps : [],
+      assignedServer: room.assignedServer || null,
+      serverReleased: Boolean(room.serverReleased),
+      score: room.score || { A: 0, B: 0 },
+      mapScores: Array.isArray(room.mapScores) ? room.mapScores : [],
+      winnerTeam: room.winnerTeam || null,
+      winnerName: room.winnerName || '',
+      resultScreenshot: room.resultScreenshot || resultScreenshots[0] || null,
+      resultScreenshots,
+      finishedAt: room.finishedAt || null,
+      chatMessages: Array.isArray(room.chatMessages) ? room.chatMessages : []
+    };
+  }
 
   createDefaultPastTournaments() {
     return [
@@ -163,8 +211,51 @@ class RoomManager {
       rooms: this.rooms.map((room) => this.serializeRoom(room)),
       pastTournaments: this.pastTournaments,
       adminLogs: this.getAdminLogs(),
+      globalMessages: this.getGlobalMessages(),
+      adminMessages: this.getAdminMessages(),
+      bracketStates: clonePlain(this.bracketStates),
       maintenanceMode: this.maintenanceMode
     };
+  }
+
+  getStateSnapshot() {
+    return {
+      version: 1,
+      rooms: clonePlain(this.rooms),
+      pastTournaments: clonePlain(this.pastTournaments),
+      adminLogs: clonePlain(this.adminLogs),
+      globalMessages: clonePlain(this.globalMessages),
+      adminMessages: clonePlain(this.adminMessages),
+      bracketStates: clonePlain(this.bracketStates),
+      maintenanceMode: this.maintenanceMode
+    };
+  }
+
+  getBracketState(game = 'cs2') {
+    const normalizedGame = normalizeGame(game);
+    return this.bracketStates[normalizedGame] || null;
+  }
+
+  saveBracketState(game = 'cs2', state = {}, actor = 'admin') {
+    const normalizedGame = normalizeGame(game);
+    const safeState = state && typeof state === 'object' ? clonePlain(state) : {};
+    if (JSON.stringify(safeState).length > 500_000) throw new Error('Bracket state is too large.');
+
+    const entry = {
+      state: safeState,
+      updatedAt: Date.now(),
+      actor
+    };
+    this.bracketStates[normalizedGame] = entry;
+    this.addAdminLog('bracket:save', { game: normalizedGame }, actor);
+    return entry;
+  }
+
+  resetBracketState(game = 'cs2', actor = 'admin') {
+    const normalizedGame = normalizeGame(game);
+    delete this.bracketStates[normalizedGame];
+    this.addAdminLog('bracket:reset', { game: normalizedGame }, actor);
+    return null;
   }
 
   getGameServers() {
@@ -932,4 +1023,5 @@ class RoomManager {
 }
 
 RoomManager.SERVER_POOLS = SERVER_POOLS;
+RoomManager.normalizeGame = normalizeGame;
 module.exports = RoomManager;

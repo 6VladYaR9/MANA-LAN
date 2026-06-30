@@ -50,6 +50,10 @@
   font-weight: 700;
 }
 
+.bracketSyncStatus {
+  color: var(--mana-yellow);
+}
+
 .bracketSwitches {
   display: grid;
   gap: 10px;
