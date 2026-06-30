@@ -1,0 +1,443 @@
+* { box-sizing: border-box; }
+
+html,
+body,
+#root { min-height: 100%; }
+
+html { background: #050505; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--text);
+  font-family: var(--font-base);
+  font-size: 14px;
+  line-height: 1.45;
+  letter-spacing: 0;
+  background-image:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0.52) 48%, rgba(20, 5, 0, 0.72)),
+    var(--page-background-image);
+  background-size: cover, cover;
+  background-position: center center, center center;
+  background-repeat: no-repeat, no-repeat;
+  background-attachment: fixed, fixed;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 72% 18%, rgba(255, 221, 40, 0.14), transparent 0 15%, transparent 36%),
+    repeating-linear-gradient(90deg, rgba(255,255,255,.025) 0 1px, transparent 1px 42px),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.02) 0 1px, transparent 1px 42px);
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  cursor: pointer;
+  text-transform: uppercase;
+  font-family: var(--font-display);
+  font-weight: 900;
+  letter-spacing: 0.045em;
+}
+
+button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+input,
+select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  outline: none;
+  background: rgba(5, 5, 5, 0.95);
+  color: #fff;
+  padding: 9px 11px;
+  font-size: 13px;
+  font-family: var(--font-base);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+input:focus,
+select:focus { border-color: var(--mana-orange); }
+
+label {
+  display: grid;
+  gap: 7px;
+  color: #f2eee7;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+label small {
+  color: var(--text-muted);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+h1,
+h2,
+h3,
+p { overflow-wrap: anywhere; }
+
+.appShell {
+  width: min(var(--app-width), calc(100vw - 40px));
+  margin: 22px auto 72px;
+}
+
+.topBar {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 16px;
+}
+
+.topActions,
+.roomNav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.serverPill,
+.miniBadge,
+.backButton,
+.roomMeta span,
+.captainBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-family: var(--font-base);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.serverPill i {
+  width: 6px;
+  height: 6px;
+  display: inline-block;
+  background: var(--mana-orange);
+  box-shadow: 0 0 10px var(--mana-orange);
+}
+
+.miniBadge { border-color: rgba(255, 255, 255, 0.28); }
+.backButton { color: var(--mana-yellow); border-color: rgba(255, 221, 40, 0.35); }
+.backButton:hover { border-color: var(--mana-yellow); }
+
+.eyebrow,
+.panelLabel {
+  color: var(--mana-orange-2);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+}
+
+.muted {
+  color: var(--text-muted);
+  font-family: var(--font-base);
+  letter-spacing: 0;
+}
+
+.upper {
+  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.55;
+  max-width: 590px;
+}
+
+.errorBox,
+.errorText {
+  color: #fff;
+  background: rgba(255, 221, 40, 0.16);
+  border: 1px solid rgba(255, 221, 40, 0.62);
+  padding: 10px 12px;
+  margin: 10px 0;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.errorText { margin: 0; }
+
+.emptyRooms {
+  min-height: 105px;
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  background: rgba(17, 14, 12, 0.78);
+}
+
+.emptyRooms h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.emptyRooms p { margin: 0; color: var(--text-muted); }
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(3px);
+}
+
+.modal {
+  width: min(500px, calc(100vw - 28px));
+  padding: 18px;
+  border: 1px solid var(--line-orange);
+  background:
+    linear-gradient(135deg, rgba(255, 221, 40, 0.07), transparent 34%),
+    #12100f;
+  box-shadow: var(--shadow);
+}
+
+.microModal { width: min(380px, calc(100vw - 28px)); }
+
+.modalHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.modalHead span {
+  color: var(--mana-orange);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+
+.modal h2,
+.modalHead h2 {
+  margin: 0 0 4px;
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 30px;
+  line-height: 1;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.xBtn,
+.ghostBtn {
+  background: #24201e !important;
+  color: #fff;
+  border: 1px solid var(--line);
+  box-shadow: none !important;
+}
+
+.xBtn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.modalForm {
+  display: grid;
+  gap: 12px;
+}
+
+.twoFields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.modalActions,
+.microForm {
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  gap: 10px;
+}
+
+.modalActions { grid-template-columns: 1fr 110px; }
+
+button:not(.modeCard):not(.mapTile):not(.xBtn):not(.ghostBtn):not(.backButton) {
+  min-height: 36px;
+  padding: 0 16px;
+  background: linear-gradient(180deg, #ff5c2d, #c52307);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 12px 24px rgba(255, 221, 40, 0.08);
+}
+
+button:not(.modeCard):not(.mapTile):not(.xBtn):not(.ghostBtn):not(.backButton):hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+
+@media (max-width: 720px) {
+  .appShell {
+    width: min(100%, calc(100vw - 24px));
+    margin-top: 14px;
+  }
+
+  .topBar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .topActions,
+  .roomNav { justify-content: flex-start; }
+
+  .twoFields,
+  .modalActions,
+  .microForm { grid-template-columns: 1fr; }
+}
+
+.hasDecor {
+  position: relative;
+  z-index: 1;
+}
+
+.navLink {
+  text-decoration: none;
+}
+
+.adminTopButton {
+  min-height: 24px !important;
+  padding: 0 9px !important;
+  background: rgba(255, 221, 40, 0.12) !important;
+  color: var(--mana-yellow) !important;
+  border: 1px solid rgba(255, 221, 40, 0.35) !important;
+  box-shadow: none !important;
+}
+
+.adminWinnerHint {
+  margin: 8px 0 0 !important;
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 800;
+}
+
+.topActions .miniBadge,
+.roomNav .miniBadge,
+.roomNav .navLink,
+.topActions .navLink {
+  min-height: 42px;
+  padding: 0 16px;
+  font-size: 13px;
+}
+
+.gameSwitchLink {
+  border-color: rgba(255, 221, 40, .9) !important;
+  background: rgba(255, 221, 40, .14) !important;
+  color: var(--mana-yellow) !important;
+}
+
+/* NAV UPDATE: крупные аккуратные кнопки сверху */
+.topActions,
+.roomNav {
+  gap: 10px;
+}
+
+.topActions .miniBadge,
+.roomNav .miniBadge,
+.topActions .navLink,
+.roomNav .navLink,
+.backButton {
+  min-height: 46px !important;
+  padding: 0 18px !important;
+  border: 1px solid rgba(255, 221, 40, .34) !important;
+  background: linear-gradient(180deg, rgba(255, 221, 40, .12), rgba(0, 0, 0, .62)) !important;
+  color: #fff !important;
+  font-family: var(--font-display) !important;
+  font-size: 15px !important;
+  letter-spacing: .075em !important;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.035), 0 14px 28px rgba(0,0,0,.28);
+}
+
+.topActions .navLink:hover,
+.roomNav .navLink:hover,
+.backButton:hover {
+  border-color: var(--mana-yellow) !important;
+  color: var(--mana-yellow) !important;
+  transform: translateY(-1px);
+}
+
+.gameSwitchLink,
+.adminTopButton {
+  border-color: rgba(255, 221, 40, .82) !important;
+  background: linear-gradient(180deg, rgba(255, 221, 40, .26), rgba(80, 64, 0, .55)) !important;
+  color: var(--mana-yellow) !important;
+}
+
+.logoutTopButton {
+  border-color: rgba(255, 255, 255, .22) !important;
+  background: rgba(0,0,0,.5) !important;
+  color: rgba(255,255,255,.78) !important;
+}
+
+.adminNavGroup {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.disabledNavButton,
+.disabledNavButton:hover {
+  opacity: .72 !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+  color: rgba(255,255,255,.6) !important;
+  border-color: rgba(255,255,255,.18) !important;
+  background: rgba(0,0,0,.42) !important;
+}
+
+.topActions {
+  flex: 1 1 auto;
+}

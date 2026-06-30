@@ -1,0 +1,15 @@
+<svg width="1280" height="720" viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#241006"/><stop offset=".48" stop-color="#080808"/><stop offset="1" stop-color="#3a1007"/></linearGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0v48" fill="none" stroke="#ffffff" stroke-opacity=".06"/></pattern>
+  </defs>
+  <rect width="1280" height="720" fill="url(#g)"/>
+  <rect width="1280" height="720" fill="url(#grid)"/>
+  <rect x="70" y="70" width="1140" height="580" fill="#000" fill-opacity=".46" stroke="#ff3d12" stroke-opacity=".65"/>
+  <text x="105" y="178" font-family="Arial Black, Impact, sans-serif" font-size="42" fill="#ff3d12" letter-spacing="8">MANA ARCHIVE</text>
+  <text x="105" y="315" font-family="Arial Black, Impact, sans-serif" font-size="108" fill="#fff" letter-spacing="10">CS2 CUP</text>
+  <text x="105" y="410" font-family="Arial Black, Impact, sans-serif" font-size="82" fill="#ff3d12" letter-spacing="9">WINNERS</text>
+  <text x="105" y="496" font-family="Arial, sans-serif" font-size="24" fill="#c8c0ba" font-weight="800">ЗАМЕНИ ЭТОТ ФАЙЛ НА ФОТО ТУРНИРА</text>
+  <rect x="940" y="112" width="210" height="72" fill="#ffdd28"/>
+  <text x="982" y="160" font-family="Arial Black, Impact, sans-serif" font-size="28" fill="#141414" letter-spacing="8">MANA</text>
+</svg>

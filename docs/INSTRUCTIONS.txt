@@ -1,0 +1,141 @@
+MANA CS2 MATCH HUB — ИНСТРУКЦИЯ
+
+1. Как подключить Google Таблицу
+
+В Google Sheets выбери «Файл → Поделиться → Опубликовать в интернете», выбери формат CSV и вставь ссылку в server/.env как GOOGLE_SHEETS_PUBLIC_CSV_URL.
+
+Важно: сайт выводит только сетку турнира. Чтобы случайно не показать лишние закрытые данные, backend ограничивает чтение таблицы настройками:
+BRACKET_MAX_ROWS=36
+BRACKET_MAX_COLUMNS=9
+
+Если используешь пример из промта, можно оставить:
+GOOGLE_SHEETS_ID=1BDsLdV_SgKJDjJNyXuii4_CirQgeER44djooT_bVnFQ
+GOOGLE_SHEETS_GID=1436645756
+GOOGLE_SHEETS_RANGE=A1:I36
+
+Если таблица не опубликована как CSV, используй Google Sheets API:
+GOOGLE_SHEETS_API_KEY=твой_api_key
+
+2. Как запустить сервер и сайт локально
+
+Шаг 1. Установи Node.js LTS.
+Проверь команды:
+node -v
+npm -v
+
+Шаг 2. Распакуй архив проекта, например в:
+C:\cs2-lan-mana-full-update
+
+Шаг 3. Открой CMD и перейди в папку проекта:
+cd C:\cs2-lan-mana-full-update
+
+Шаг 4. Укажи обычный npm registry:
+npm config set registry https://registry.npmjs.org/
+
+Шаг 5. Скопируй env-файл:
+copy .env.example server\.env
+
+Шаг 6. Установи зависимости:
+npm run install:all
+
+Шаг 7. Запусти сайт и backend:
+npm run dev
+
+После запуска:
+Frontend: http://localhost:5173
+Backend:  http://localhost:3001
+
+Для LAN-клуба открывай адрес Network, который покажет Vite, например:
+http://192.168.88.31:5173
+
+Если с других ПК сайт не открывается, разреши порты на машине, где запущен проект:
+netsh advfirewall firewall add rule name="MANA Frontend 5173" dir=in action=allow protocol=TCP localport=5173
+netsh advfirewall firewall add rule name="MANA Backend 3001" dir=in action=allow protocol=TCP localport=3001
+
+3. Как заменить фон
+
+Фон сайта лежит тут:
+client/public/assets/backgrounds/mana-bg-1920x1080.png
+
+Рекомендуемый файл:
+PNG, 1920x1080 Full HD или выше.
+
+Можно положить новый PNG в эту папку и поменять переменную в файле:
+client/src/styles/variables.css
+
+Переменная:
+--page-background-image: url('/assets/backgrounds/mana-bg-1920x1080.png');
+
+4. CS2-серверы и GOTV
+
+Список серверов находится в:
+server/roomManager.js
+
+Сейчас настроено 4 сервера для ЮЗ и 4 сервера для Ленина.
+IP одинаковый, порты разные. Там же указаны GOTV-порты.
+
+После создания матча сервер резервируется автоматически.
+После ручного завершения матча сервер освобождается для следующего матча.
+
+==============================
+ОБНОВЛЕНИЕ: СЕТКИ И ПРОШЛЫЕ ТУРНИРЫ
+==============================
+
+1. Где менять команды и результаты сетки
+
+Файл:
+client/src/data/tournamentData.ts
+
+В нём находятся:
+- ROUND_ROBIN_TEAMS — команды A-H для группового этапа
+- ROUND_ROBIN_RESULTS — результаты Round Robin
+- QUARTER_FINALS — стартовые пары четвертьфинала
+- PAST_TOURNAMENTS — прошлые турниры, фото, пьедестал и составы
+
+На странице /bracket также есть визуальный редактор:
+- можно менять названия команд Round Robin
+- можно менять результаты матчей в матрице
+- можно менять команды четвертьфинала
+- можно вручную выбирать победителей, они автоматически проходят дальше
+
+Данные редактора сохраняются в localStorage браузера. Кнопка «Сбросить сетку» возвращает пример из tournamentData.ts.
+
+2. Как заменить фото турнира
+
+Фото турнира больше НЕ берётся из заднего фона сайта.
+Для турнира есть отдельное поле:
+
+bannerImage: '/assets/tournaments/mana-cup-banner.svg'
+
+Положи свою картинку в:
+client/public/assets/tournaments/
+
+Например:
+client/public/assets/tournaments/november-cup.jpg
+
+И поменяй путь в client/src/data/tournamentData.ts:
+
+bannerImage: '/assets/tournaments/november-cup.jpg'
+
+3. Как заменить фото команд на пьедестале
+
+Положи фото команд в:
+client/public/assets/teams/
+
+Например:
+client/public/assets/teams/team-a-winners.jpg
+
+И поменяй поля:
+teamPhoto: '/assets/teams/team-a-winners.jpg'
+
+4. Где менять составы команд
+
+В client/src/data/tournamentData.ts:
+
+players: ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5']
+
+5. Страницы
+
+/bracket — Просмотр сетки: Round Robin + Single Elimination
+/past — список прошлых турниров
+/past/mana-cs2-cup-2026 — страница конкретного турнира с пьедесталом

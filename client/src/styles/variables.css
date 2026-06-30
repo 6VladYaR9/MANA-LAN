@@ -1,0 +1,30 @@
+:root {
+  --bg: #060606;
+  --bg-soft: #101010;
+  --panel: rgba(18, 17, 15, 0.94);
+  --panel-strong: rgba(8, 8, 8, 0.97);
+  --line: rgba(255, 255, 255, 0.12);
+  --line-soft: rgba(255, 255, 255, 0.07);
+  --line-orange: rgba(255, 221, 40, 0.72);
+  --text: #f7f2ea;
+  --text-muted: #b8b0a8;
+  --text-dim: #77716b;
+  --mana-orange: #ffdd28;
+  --mana-orange-2: #f7c600;
+  --mana-yellow: #ffdd28;
+  --mana-green: #37d97b;
+  --mana-danger: #ffdd28;
+  --shadow: 0 22px 60px rgba(0, 0, 0, 0.48);
+  --font-base: Arial, Helvetica, sans-serif;
+  --font-display: 'Arial Black', Impact, Haettenschweiler, sans-serif;
+  --app-width: 920px;
+
+  /*
+    Заменяемый фон сайта.
+    Формат: PNG.
+    Размер: 1920x1080 Full HD или выше.
+    Чтобы заменить фон, положи PNG в client/public/assets/backgrounds/
+    и поменяй только эту переменную.
+  */
+  --page-background-image: url('/assets/backgrounds/mana-bg-1920x1080.png');
+}

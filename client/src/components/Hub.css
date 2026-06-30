@@ -1,0 +1,423 @@
+.hubPage {
+  --app-width: 1080px;
+}
+
+.hubHero {
+  min-height: 214px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 34px 38px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(90deg, rgba(0,0,0,.24), rgba(0,0,0,.76)),
+    repeating-linear-gradient(135deg, rgba(255, 221, 40, 0.08) 0, rgba(255, 221, 40, 0.08) 1px, transparent 1px, transparent 10px),
+    rgba(24, 19, 16, 0.96);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.heroCopy h1 {
+  margin: 6px 0 8px;
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: clamp(50px, 7vw, 74px);
+  line-height: 0.9;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.heroCopy h1 span,
+.bookingTitle h2 span { color: var(--mana-orange); }
+
+.heroQrCard {
+  width: 210px;
+  flex: 0 0 210px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  text-decoration: none;
+  border: 1px solid rgba(255, 221, 40, 0.55);
+  background: linear-gradient(180deg, rgba(255,221,40,.08), rgba(0,0,0,.12)), rgba(8,8,8,.88);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), 0 18px 42px rgba(0,0,0,.38);
+}
+
+.heroQrCard img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  display: block;
+  background: #fff;
+  padding: 10px;
+}
+
+.heroQrCard div {
+  display: grid;
+  gap: 3px;
+}
+
+.heroQrCard span,
+.heroQrCard b,
+.heroQrCard small {
+  display: block;
+}
+
+.heroQrCard span {
+  color: var(--mana-yellow);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.heroQrCard b {
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.heroQrCard small {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.nickStrip {
+  display: grid;
+  grid-template-columns: 1fr 1.6fr;
+  gap: 10px;
+  align-items: stretch;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: rgba(9, 9, 9, 0.94);
+}
+
+.nickInfo {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  align-items: center;
+  gap: 10px;
+}
+
+.nickInfo b,
+.nickInfo span {
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.nickInfo b { color: var(--mana-orange); }
+
+.bookingTitle { margin: 10px 0 16px; }
+
+.bookingTitle h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 42px;
+  line-height: 0.95;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.bookingTitle p {
+  margin: 6px 0 0;
+  max-width: 680px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.modePanel {
+  display: grid;
+  grid-template-columns: 230px 1fr 145px;
+  gap: 12px;
+  align-items: stretch;
+  padding: 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.modeIntro {
+  padding: 4px 0;
+}
+
+.modeIntro span {
+  color: var(--mana-orange);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+
+.modeIntro h3 {
+  margin: 3px 0;
+  font-family: var(--font-display);
+  font-size: 25px;
+  line-height: 0.94;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.modeIntro p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.modeCards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+}
+
+.modeCard {
+  min-height: 66px;
+  padding: 10px;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: rgba(8, 8, 8, 0.92);
+  color: #fff;
+}
+
+.modeCard.active {
+  border-color: var(--mana-orange);
+  box-shadow: inset 0 0 0 1px rgba(255, 221, 40, 0.45), 0 0 18px rgba(255, 221, 40, 0.08);
+}
+
+.modeCard b {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 23px;
+  line-height: 0.9;
+}
+
+.modeCard span {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-family: var(--font-base);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.roomsSection {
+  min-height: 90px;
+}
+
+.roomsList {
+  display: grid;
+  gap: 9px;
+}
+
+.roomCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(138px, max-content);
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: rgba(19, 16, 14, 0.95);
+  overflow: hidden;
+}
+
+.roomMain { min-width: 0; }
+
+.roomCard > button {
+  justify-self: end;
+  width: min(170px, 100%);
+  min-width: 138px;
+  white-space: nowrap;
+}
+
+.roomMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+
+.roomMeta span { color: var(--mana-orange-2); }
+
+.roomCard h3 {
+  margin: 0 0 5px;
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+
+.roomCard h3 em {
+  color: var(--mana-orange);
+  font-style: normal;
+}
+
+.roomCard p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+@media (max-width: 900px) {
+  .hubHero { padding: 28px; }
+  .modePanel { grid-template-columns: 1fr; }
+  .createBtn { min-height: 42px; }
+}
+
+@media (max-width: 620px) {
+  .hubHero { align-items: flex-start; flex-direction: column; }
+  .heroQrCard {
+    width: 100%;
+    max-width: 260px;
+    flex-basis: auto;
+  }
+  .nickStrip,
+  .nickInfo,
+  .roomCard,
+  .modeCards { grid-template-columns: 1fr; }
+
+  .roomCard > button {
+    justify-self: stretch;
+    width: 100%;
+  }
+}
+
+.sectionHeaderLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 20px 0 9px;
+}
+
+.sectionHeaderLine h3 {
+  margin: 0;
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 25px;
+  line-height: 1;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.sectionHeaderLine span {
+  min-width: 30px;
+  min-height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line-orange);
+  color: var(--mana-orange-2);
+  background: rgba(0,0,0,.58);
+}
+
+.roomCardActions {
+  display: grid;
+  gap: 8px;
+  justify-items: stretch;
+}
+
+.roomCardActions > button {
+  width: min(170px, 100%);
+  min-width: 138px;
+  white-space: nowrap;
+}
+
+.closeRoomButton {
+  min-height: 34px !important;
+  color: var(--mana-yellow) !important;
+  border-color: rgba(255, 221, 40, .38) !important;
+}
+
+@media (max-width: 620px) {
+  .roomCardActions,
+  .roomCardActions > button {
+    width: 100%;
+  }
+}
+
+.adminTopButton {
+  min-height: 24px !important;
+  padding: 0 9px !important;
+  background: rgba(255, 221, 40, 0.12) !important;
+  color: var(--mana-yellow) !important;
+  border-color: rgba(255, 221, 40, 0.35) !important;
+  box-shadow: none !important;
+}
+
+.hubAdminNotice {
+  align-self: stretch;
+  display: grid;
+  place-items: center;
+  min-height: 50px;
+}
+
+.playerNoticePanel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(255, 221, 40, .34);
+  background: linear-gradient(90deg, rgba(255, 221, 40, .1), rgba(0,0,0,.78));
+}
+
+.playerNoticePanel span {
+  color: var(--mana-yellow);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.playerNoticePanel h3 {
+  margin: 4px 0 5px;
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 26px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.playerNoticePanel p {
+  margin: 0;
+  color: var(--text-muted);
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.playerAdminLink {
+  min-height: 46px;
+  min-width: 160px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 221, 40, .48);
+  color: var(--mana-yellow);
+  text-decoration: none;
+  font-family: var(--font-display);
+  font-weight: 900;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.adminModePanel {
+  border-color: rgba(255, 221, 40, .42);
+}
+
+@media (max-width: 760px) {
+  .playerNoticePanel { display: grid; }
+  .playerAdminLink { width: 100%; }
+}

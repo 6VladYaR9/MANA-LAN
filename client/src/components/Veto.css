@@ -1,0 +1,257 @@
+.vetoPanel {
+  padding: 16px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(135deg, rgba(255, 221, 40, 0.06), transparent 36%),
+    var(--panel);
+}
+
+.vetoHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.vetoHead h2 {
+  margin: 2px 0 0;
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: clamp(34px, 5vw, 46px);
+  line-height: 0.95;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.vetoHead h2 span { color: var(--mana-orange); }
+
+.vetoScore {
+  min-width: 88px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 221, 40, 0.28);
+  background: rgba(255, 221, 40, 0.07);
+  text-align: center;
+}
+
+.vetoScore b {
+  display: block;
+  color: var(--mana-yellow);
+  font-family: var(--font-display);
+  font-size: 25px;
+  line-height: 1;
+}
+
+.vetoScore small {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .12em;
+}
+
+.seriesBox,
+.turnBox,
+.resultBox,
+.historyBox {
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  padding: 12px;
+  margin-bottom: 12px;
+  background: rgba(0, 0, 0, 0.34);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.seriesBox {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.seriesBox b { color: var(--mana-yellow); text-transform: uppercase; }
+
+.seriesBox div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.seriesBox span {
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 221, 40, 0.25);
+  background: rgba(255, 221, 40, 0.08);
+  color: #fff;
+  text-transform: uppercase;
+}
+
+.turnBox p,
+.resultBox p,
+.historyBox p { margin: 4px 0; }
+
+.banWord { color: var(--mana-danger); }
+.pickWord { color: var(--mana-yellow); }
+
+.resultBox h3 {
+  margin: 0 0 7px;
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 24px;
+  line-height: 1.08;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.resultBox code {
+  display: block;
+  margin-top: 10px;
+  padding: 11px;
+  background: #050505;
+  color: var(--mana-green);
+  font-size: 14px;
+  font-weight: 900;
+  overflow-x: auto;
+}
+
+.mapsGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(92px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.mapTile {
+  position: relative;
+  min-height: 132px;
+  display: grid;
+  align-items: end;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #0a0a0a;
+  color: #fff;
+  isolation: isolate;
+}
+
+.mapImageWrap,
+.mapOverlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.mapImageWrap {
+  z-index: -2;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #111;
+}
+
+.mapImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  filter: saturate(1.06) contrast(1.05) brightness(.92);
+  transform: scale(1.01);
+}
+
+.mapOverlay {
+  background:
+    linear-gradient(180deg, rgba(0,0,0,.20), rgba(0,0,0,.48) 46%, rgba(0,0,0,.90)),
+    rgba(0,0,0,.20);
+  z-index: -1;
+}
+
+.mapContent {
+  width: 100%;
+  display: grid;
+  gap: 5px;
+  padding: 10px 7px 9px;
+  border-top: 3px solid rgba(255, 255, 255, 0.22);
+  background: linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,.62));
+}
+
+.mapTile.available:not(:disabled):hover {
+  border-color: var(--mana-yellow);
+  transform: translateY(-2px);
+}
+
+.mapTile.banned,
+.mapTile.autobanned {
+  color: #8d8985;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.mapTile.banned .mapImage,
+.mapTile.autobanned .mapImage {
+  filter: grayscale(1) brightness(0.42);
+}
+
+.mapTile.banned .mapContent,
+.mapTile.autobanned .mapContent {
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.mapTile.banned .mapContent::after,
+.mapTile.autobanned .mapContent::after {
+  content: '';
+  position: absolute;
+  left: -22%;
+  right: -22%;
+  bottom: 48%;
+  height: 2px;
+  background: rgba(255, 221, 40, 0.86);
+  transform: rotate(-18deg);
+}
+
+.mapTile.picked {
+  border-color: var(--mana-yellow);
+  box-shadow: 0 0 0 2px rgba(255, 221, 40, 0.35) inset;
+}
+
+.mapTile.picked .mapContent {
+  border-top-color: var(--mana-yellow);
+  background: linear-gradient(180deg, rgba(255,221,40,.13), rgba(0,0,0,.74));
+}
+
+.mapTile b {
+  font-family: var(--font-display);
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.mapTile small {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+}
+
+.historyBox h3 {
+  margin: 0 0 7px;
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.historyBox ol {
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.75;
+  font-size: 13px;
+}
+
+@media (max-width: 1120px) {
+  .mapsGrid { grid-template-columns: repeat(4, minmax(128px, 1fr)); }
+}
+
+@media (max-width: 680px) {
+  .vetoHead { flex-direction: column; }
+  .mapsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mapTile { min-height: 128px; }
+}

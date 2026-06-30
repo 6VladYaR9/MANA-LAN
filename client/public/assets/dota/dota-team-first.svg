@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720">
+  <rect width="1280" height="720" fill="#070707"/>
+  <path d="M0 590 C250 430 420 660 700 510 S1050 320 1280 440 V720 H0Z" fill="#ffdd28" opacity=".18"/>
+  <rect x="60" y="60" width="1160" height="600" fill="none" stroke="#ffdd28" stroke-width="8"/>
+  <text x="90" y="210" fill="#ffdd28" font-size="78" font-family="Arial Black, Impact">DOTA TEAM</text>
+  <text x="90" y="310" fill="#fff" font-size="56" font-family="Arial Black, Impact">first PLACE</text>
+  <text x="90" y="405" fill="#b8b0a8" font-size="34" font-family="Arial">Temporary placeholder image</text>
+</svg>

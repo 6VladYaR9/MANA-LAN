@@ -1,0 +1,13 @@
+<svg width="720" height="420" viewBox="0 0 720 420" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1c130f"/><stop offset="1" stop-color="#050505"/></linearGradient>
+    <pattern id="p" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0v36" fill="none" stroke="#fff" stroke-opacity=".07"/></pattern>
+  </defs>
+  <rect width="720" height="420" fill="url(#bg)"/>
+  <rect width="720" height="420" fill="url(#p)"/>
+  <rect x="34" y="34" width="652" height="352" fill="#000" fill-opacity=".42" stroke="#d9d9d9" stroke-width="4"/>
+  <circle cx="360" cy="178" r="74" fill="#d9d9d9" opacity=".92"/>
+  <text x="360" y="203" font-family="Arial Black, Impact, sans-serif" font-size="62" fill="#111" text-anchor="middle">M</text>
+  <text x="360" y="305" font-family="Arial Black, Impact, sans-serif" font-size="38" fill="#fff" text-anchor="middle" letter-spacing="6">TEAM PHOTO</text>
+  <text x="360" y="346" font-family="Arial, sans-serif" font-size="18" fill="#aaa" text-anchor="middle">замени файл на фото команды</text>
+</svg>
