@@ -1,7 +1,8 @@
-import { ChangeEvent, ReactNode, useMemo, useState } from 'react';
+import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import ManaLogo from '../components/ManaLogo';
-import type { GameType } from '../types';
+import { socket } from '../socket';
+import type { GameType, SocketAck } from '../types';
 import {
   ROUND_ROBIN_GROUPS,
   QuarterFinalPair,
@@ -36,8 +37,28 @@ type GroupState = {
 
 type GroupMap = Record<RoundRobinGroupKey, GroupState>;
 type QuarterFinalOverrides = Array<Partial<QuarterFinalPair>>;
-
-const STORAGE_KEY_PREFIX = 'mana-bracket-editor-v6';
+type BracketEditorState = {
+  activeTab?: BracketTab;
+  groups?: GroupMap;
+  quarterFinalOverrides?: QuarterFinalOverrides;
+  winners?: PlayoffState;
+};
+type BracketEntry = {
+  state: BracketEditorState;
+  updatedAt: number;
+  actor?: string;
+};
+type BracketUpdatePayload = {
+  game?: GameType;
+  bracket: BracketEntry | null;
+};
+type BracketSourcePayload = {
+  ok: boolean;
+  source?: string;
+  cached?: boolean;
+  stale?: boolean;
+  error?: string;
+};
 
 const DEFAULT_PLAYOFF: PlayoffState = {
   qf: [null, null, null, null],
@@ -171,38 +192,38 @@ function applyQuarterFinalOverrides(auto: QuarterFinalPair[], overrides: Quarter
   }));
 }
 
-function getStoredState(game: GameType) {
-  try {
-    const raw = localStorage.getItem(`${STORAGE_KEY_PREFIX}:${game}`);
-    if (!raw) return null;
-    return JSON.parse(raw) as {
-      activeTab?: BracketTab;
-      groups?: GroupMap;
-      quarterFinalOverrides?: QuarterFinalOverrides;
-      winners?: PlayoffState;
-    };
-  } catch {
-    return null;
-  }
+function isBracketTab(value: unknown): value is BracketTab {
+  return value === 'yuz' || value === 'lenina' || value === 'playoff';
 }
 
-function saveState(game: GameType, payload: {
-  activeTab: BracketTab;
-  groups: GroupMap;
-  quarterFinalOverrides: QuarterFinalOverrides;
-  winners: PlayoffState;
+function isGroupMap(value: unknown): value is GroupMap {
+  const groups = value as Partial<GroupMap> | null;
+  return Boolean(groups?.yuz?.teams && groups?.yuz?.results && groups?.lenina?.teams && groups?.lenina?.results);
+}
+
+function isPlayoffState(value: unknown): value is PlayoffState {
+  const state = value as Partial<PlayoffState> | null;
+  return Boolean(Array.isArray(state?.qf) && Array.isArray(state?.sf) && 'final' in (state || {}));
+}
+
+export default function TournamentBracket({
+  game,
+  isAdmin,
+  adminToken,
+  onAdminLogout
+}: {
+  game: GameType;
+  isAdmin: boolean;
+  adminToken: string;
+  onAdminLogout: () => void;
 }) {
-  localStorage.setItem(`${STORAGE_KEY_PREFIX}:${game}`, JSON.stringify(payload));
-}
-
-export default function TournamentBracket({ game, isAdmin, onAdminLogout }: { game: GameType; isAdmin: boolean; onAdminLogout: () => void }) {
-  const defaults = makeDefaultGroups();
-  const stored = getStoredState(game);
-
-  const [activeTab, setActiveTab] = useState<BracketTab>(stored?.activeTab || 'yuz');
-  const [groups, setGroups] = useState<GroupMap>(stored?.groups || defaults);
-  const [quarterFinalOverrides, setQuarterFinalOverrides] = useState<QuarterFinalOverrides>(stored?.quarterFinalOverrides || []);
-  const [winners, setWinners] = useState<PlayoffState>(stored?.winners || DEFAULT_PLAYOFF);
+  const [activeTab, setActiveTab] = useState<BracketTab>('yuz');
+  const [groups, setGroups] = useState<GroupMap>(() => makeDefaultGroups());
+  const [quarterFinalOverrides, setQuarterFinalOverrides] = useState<QuarterFinalOverrides>([]);
+  const [winners, setWinners] = useState<PlayoffState>(DEFAULT_PLAYOFF);
+  const [syncMessage, setSyncMessage] = useState('');
+  const [sourceInfo, setSourceInfo] = useState('');
+  const [bracketLoaded, setBracketLoaded] = useState(false);
 
   const autoQuarterFinals = useMemo(() => buildAutoQuarterFinals(groups), [groups]);
   const quarterFinals = useMemo(
@@ -221,13 +242,34 @@ export default function TournamentBracket({ game, isAdmin, onAdminLogout }: { ga
     [activeGroup]
   );
 
+  const canAdminEdit = isAdmin && bracketLoaded;
+
+  const applyEditorState = (state?: BracketEditorState, syncActiveTab = true) => {
+    if (syncActiveTab) setActiveTab(isBracketTab(state?.activeTab) ? state.activeTab : 'yuz');
+    setGroups(isGroupMap(state?.groups) ? state.groups : makeDefaultGroups());
+    setQuarterFinalOverrides(Array.isArray(state?.quarterFinalOverrides) ? state.quarterFinalOverrides : []);
+    setWinners(isPlayoffState(state?.winners) ? state.winners : DEFAULT_PLAYOFF);
+  };
+
+  const saveEditorState = (payload: Required<BracketEditorState>) => {
+    if (!canAdminEdit || !adminToken) return;
+
+    socket.emit('bracket:save', { game, adminToken, state: payload }, (response: SocketAck<{ bracket: BracketEntry }>) => {
+      if (!response.ok) {
+        setSyncMessage(`Save failed: ${response.error}`);
+        return;
+      }
+      setSyncMessage('Saved to server');
+    });
+  };
+
   const persist = (
     nextActiveTab = activeTab,
     nextGroups = groups,
     nextOverrides = quarterFinalOverrides,
     nextWinners = winners
   ) => {
-    saveState(game, {
+    saveEditorState({
       activeTab: nextActiveTab,
       groups: nextGroups,
       quarterFinalOverrides: nextOverrides,
@@ -235,7 +277,50 @@ export default function TournamentBracket({ game, isAdmin, onAdminLogout }: { ga
     });
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    setBracketLoaded(false);
+
+    socket.emit('bracket:get', { game }, (response: SocketAck<{ bracket: BracketEntry | null }>) => {
+      if (cancelled) return;
+      if (!response.ok) {
+        setSyncMessage(`Load failed: ${response.error}`);
+        return;
+      }
+      applyEditorState(response.bracket?.state);
+      setBracketLoaded(true);
+      if (response.bracket?.updatedAt) setSyncMessage(`Loaded server state ${new Date(response.bracket.updatedAt).toLocaleString()}`);
+    });
+
+    const handleUpdate = (payload: BracketUpdatePayload) => {
+      if (payload.game && payload.game !== game) return;
+      applyEditorState(payload.bracket?.state);
+      setBracketLoaded(true);
+      setSyncMessage(payload.bracket?.updatedAt ? `Updated ${new Date(payload.bracket.updatedAt).toLocaleString()}` : 'Reset to defaults');
+    };
+
+    socket.on('bracket:update', handleUpdate);
+
+    const apiBaseUrl = import.meta.env.VITE_API_URL || (window.location.port === '5173' ? `${window.location.protocol}//${window.location.hostname}:3001` : '');
+    fetch(`${apiBaseUrl}/api/bracket`)
+      .then((response) => response.json())
+      .then((payload: BracketSourcePayload) => {
+        if (cancelled) return;
+        const freshness = payload.stale ? 'stale cache' : (payload.cached ? 'cache' : 'live');
+        setSourceInfo(`${payload.source || 'unknown'} · ${freshness}${payload.error ? ` · ${payload.error}` : ''}`);
+      })
+      .catch((error) => {
+        if (!cancelled) setSourceInfo(error instanceof Error ? error.message : String(error));
+      });
+
+    return () => {
+      cancelled = true;
+      socket.off('bracket:update', handleUpdate);
+    };
+  }, [game, isAdmin, adminToken]);
+
   const changeTab = (tab: BracketTab) => {
+    if (isAdmin && !bracketLoaded) return;
     setActiveTab(tab);
     persist(tab);
   };
@@ -334,13 +419,15 @@ export default function TournamentBracket({ game, isAdmin, onAdminLogout }: { ga
   };
 
   const reset = () => {
-    const nextGroups = makeDefaultGroups();
-    const nextOverrides: QuarterFinalOverrides = [];
-    const nextWinners = DEFAULT_PLAYOFF;
-    setGroups(nextGroups);
-    setQuarterFinalOverrides(nextOverrides);
-    setWinners(nextWinners);
-    saveState(game, { activeTab, groups: nextGroups, quarterFinalOverrides: nextOverrides, winners: nextWinners });
+    if (!canAdminEdit || !adminToken) return;
+    socket.emit('bracket:reset', { game, adminToken }, (response: SocketAck<{ bracket: null }>) => {
+      if (!response.ok) {
+        setSyncMessage(`Reset failed: ${response.error}`);
+        return;
+      }
+      applyEditorState(undefined);
+      setSyncMessage('Reset on server');
+    });
   };
 
   const qfWinners = quarterFinals.map((match, index) => getMatchWinnerName(match, winners.qf[index]));
@@ -361,7 +448,7 @@ export default function TournamentBracket({ game, isAdmin, onAdminLogout }: { ga
         <ManaLogo />
         <nav className="roomNav">
           <button type="button" className="miniBadge navLink gameSwitchLink disabledNavButton" disabled>DOTA 2 · В разработке</button>
-          {isAdmin && <button type="button" className="ghostBtn bracketReload" onClick={reset}>Сбросить сетки</button>}
+          {isAdmin && <button type="button" className="ghostBtn bracketReload" onClick={reset} disabled={!canAdminEdit}>Сбросить сетки</button>}
           <Link className="miniBadge navLink" to="/past">Прошлые турниры</Link>
           {isAdmin ? (
             <>
@@ -380,18 +467,19 @@ export default function TournamentBracket({ game, isAdmin, onAdminLogout }: { ga
           <span className="eyebrow">MANA TOURNAMENT VIEW · {game === 'cs2' ? 'CS2' : 'DOTA 2'}</span>
           <h1>ПРОСМОТР <span>СЕТКИ</span></h1>
           <p className="muted">Победители Round Robin автоматически попадают в playoff: 1 место клуба играет против 4 места противоположного клуба, 2 место — против 3 места.</p>
+          {(sourceInfo || syncMessage) && <p className="muted bracketSyncStatus">{[sourceInfo, syncMessage].filter(Boolean).join(' · ')}</p>}
         </div>
 
         <div className="bracketSwitches">
-          <button type="button" className={`bracketSwitch ${activeTab === 'yuz' ? 'active' : ''}`} onClick={() => changeTab('yuz')}>
+          <button type="button" className={`bracketSwitch ${activeTab === 'yuz' ? 'active' : ''}`} disabled={isAdmin && !bracketLoaded} onClick={() => changeTab('yuz')}>
             <span>ROUND ROBIN</span>
             <b>ЮЗ</b>
           </button>
-          <button type="button" className={`bracketSwitch ${activeTab === 'lenina' ? 'active' : ''}`} onClick={() => changeTab('lenina')}>
+          <button type="button" className={`bracketSwitch ${activeTab === 'lenina' ? 'active' : ''}`} disabled={isAdmin && !bracketLoaded} onClick={() => changeTab('lenina')}>
             <span>ROUND ROBIN</span>
             <b>ЛЕНИНА</b>
           </button>
-          <button type="button" className={`bracketSwitch ${activeTab === 'playoff' ? 'active' : ''}`} onClick={() => changeTab('playoff')}>
+          <button type="button" className={`bracketSwitch ${activeTab === 'playoff' ? 'active' : ''}`} disabled={isAdmin && !bracketLoaded} onClick={() => changeTab('playoff')}>
             <span>PLAYOFF</span>
             <b>SINGLE ELIMINATION</b>
           </button>
@@ -408,7 +496,7 @@ export default function TournamentBracket({ game, isAdmin, onAdminLogout }: { ga
           onQuarterFinalTeamChange={updateQuarterFinalTeam}
           onWinnerSelect={setWinner}
           onResetOverrides={resetQuarterFinalOverrides}
-          isAdmin={isAdmin}
+          isAdmin={canAdminEdit}
         />
       ) : (
         <RoundRobinSection
@@ -418,7 +506,7 @@ export default function TournamentBracket({ game, isAdmin, onAdminLogout }: { ga
           standings={activeStandings}
           onTeamNameChange={(index, value) => updateTeamName(activeGroupKey, index, value)}
           onScoreChange={(rowId, colId, value) => updateScore(activeGroupKey, rowId, colId, value)}
-          isAdmin={isAdmin}
+          isAdmin={canAdminEdit}
         />
       )}
     </main>

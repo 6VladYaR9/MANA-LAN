@@ -6,6 +6,7 @@ const cors = require('cors');
 const { Server } = require('socket.io');
 const RoomManager = require('./roomManager');
 const { loadDotEnv, getBracketRows, FALLBACK_ROWS } = require('./services/bracketSource');
+const { createStateStore } = require('./services/stateStore');
 const { verifyAdmin, createToken, validateAdminConfig } = require('./auth');
 
 loadDotEnv();
@@ -33,13 +34,15 @@ function parseAllowedOrigins() {
 }
 
 const CLIENT_ORIGINS = parseAllowedOrigins();
+const stateStore = createStateStore();
+const initialState = stateStore.load();
 
 const app = express();
 const server = http.createServer(app);
-const roomManager = new RoomManager();
+const roomManager = new RoomManager(initialState);
 const adminSessions = new Map();
-const roomAccessTokens = new Map();
-const playerSessions = new Map();
+const roomAccessTokens = restoreExpiringMap(initialState.roomAccessTokens);
+const playerSessions = restoreExpiringMap(initialState.playerSessions);
 const adminLoginFailures = new Map();
 
 app.use(cors({ origin: CLIENT_ORIGINS }));
@@ -90,6 +93,34 @@ const io = new Server(server, {
   maxHttpBufferSize: 6e6
 });
 
+function restoreExpiringMap(entries) {
+  const map = new Map();
+  if (!Array.isArray(entries)) return map;
+
+  const now = Date.now();
+  entries.forEach((entry) => {
+    if (!Array.isArray(entry) || entry.length !== 2) return;
+    const [token, value] = entry;
+    if (!token || !value || typeof value !== 'object') return;
+    if (Number(value.expiresAt) <= now) return;
+    map.set(String(token), value);
+  });
+  return map;
+}
+
+function serializeExpiringMap(map) {
+  const now = Date.now();
+  return Array.from(map.entries()).filter(([, value]) => Number(value?.expiresAt) > now);
+}
+
+function saveState() {
+  stateStore.save({
+    ...roomManager.getStateSnapshot(),
+    roomAccessTokens: serializeExpiringMap(roomAccessTokens),
+    playerSessions: serializeExpiringMap(playerSessions)
+  });
+}
+
 function publicRoomsPayload() {
   return { rooms: roomManager.getPublicRooms() };
 }
@@ -114,6 +145,7 @@ function ackError(callback, error) {
 }
 
 function emitAfterRoomChange(roomId) {
+  saveState();
   emitRoomState(roomId);
   emitRoomsList();
 }
@@ -332,6 +364,7 @@ io.on('connection', (socket) => {
       socket.data.adminName = String(payload?.login || 'admin').trim();
       socket.join(ADMIN_ROOM);
       roomManager.addAdminLog('admin:login', { socketId: socket.id }, socket.data.adminName);
+      saveState();
       ackOk(callback, { token, admin: { login: socket.data.adminName } });
     } catch (error) {
       ackError(callback, error);
@@ -369,6 +402,7 @@ io.on('connection', (socket) => {
     try {
       requireAdmin(socket, payload);
       roomManager.addAdminLog('backup:export', {}, socket.data.adminName || 'admin');
+      saveState();
       ackOk(callback, { backup: roomManager.getBackup() });
     } catch (error) {
       ackError(callback, error);
@@ -380,6 +414,7 @@ io.on('connection', (socket) => {
     try {
       const actor = requireAdmin(socket, payload);
       const scope = roomManager.clearChats(payload?.scope, actor);
+      saveState();
       ackOk(callback, { scope });
 
       if (scope === 'global' || scope === 'all') {
@@ -406,8 +441,45 @@ io.on('connection', (socket) => {
     try {
       const actor = requireAdmin(socket, payload);
       const enabled = roomManager.setMaintenanceMode(Boolean(payload?.enabled), actor);
+      saveState();
       ackOk(callback, { enabled });
       io.emit('maintenance:update', { enabled });
+    } catch (error) {
+      ackError(callback, error);
+    }
+  });
+
+  socket.on('bracket:get', (payload, callback) => {
+    const done = typeof payload === 'function' ? payload : callback;
+    const request = typeof payload === 'function' ? {} : payload || {};
+    try {
+      ackOk(done, { bracket: roomManager.getBracketState(request.game) });
+    } catch (error) {
+      ackError(done, error);
+    }
+  });
+
+  socket.on('bracket:save', (payload, callback) => {
+    try {
+      const actor = requireAdmin(socket, payload);
+      const game = RoomManager.normalizeGame(payload?.game);
+      const bracket = roomManager.saveBracketState(game, payload?.state, actor);
+      saveState();
+      ackOk(callback, { bracket });
+      io.emit('bracket:update', { game, bracket });
+    } catch (error) {
+      ackError(callback, error);
+    }
+  });
+
+  socket.on('bracket:reset', (payload, callback) => {
+    try {
+      const actor = requireAdmin(socket, payload);
+      const game = RoomManager.normalizeGame(payload?.game);
+      const bracket = roomManager.resetBracketState(game, actor);
+      saveState();
+      ackOk(callback, { bracket });
+      io.emit('bracket:update', { game, bracket });
     } catch (error) {
       ackError(callback, error);
     }
@@ -424,6 +496,7 @@ io.on('connection', (socket) => {
       roomManager.addAdminLog('room:create', { roomId: room.id, game: room.game, title: `${room.teamAName} vs ${room.teamBName}` }, actor);
       socket.join(room.id);
       const roomAccessToken = grantRoomAccess(socket, room);
+      saveState();
       ackOk(callback, { room: roomManager.serializeRoom(room), roomAccessToken });
       emitRoomsList();
     } catch (error) {
@@ -436,6 +509,7 @@ io.on('connection', (socket) => {
       const actor = requireAdmin(socket, payload);
       const room = roomManager.deleteRoom(payload?.roomId);
       roomManager.addAdminLog('room:delete', { roomId: room.id, title: `${room.teamAName} vs ${room.teamBName}` }, actor);
+      saveState();
       ackOk(callback, { roomId: room.id });
       io.to(room.id).emit('room:deleted', { roomId: room.id });
       emitRoomsList();
@@ -457,6 +531,7 @@ io.on('connection', (socket) => {
     try {
       const message = roomManager.addGlobalMessage({ socketId: socket.id, nickname: payload?.nickname, text: payload?.text });
       const messages = roomManager.getGlobalMessages();
+      saveState();
       ackOk(callback, { message, messages });
       io.emit('chat:global:update', { messages });
     } catch (error) {
@@ -478,6 +553,7 @@ io.on('connection', (socket) => {
       requireAdmin(socket, payload);
       const message = roomManager.addAdminMessage({ socketId: socket.id, nickname: payload?.nickname || 'admin', text: payload?.text, image: payload?.image });
       const messages = roomManager.getAdminMessages();
+      saveState();
       ackOk(callback, { message, messages });
       io.to(ADMIN_ROOM).emit('chat:admin:update', { messages });
     } catch (error) {
@@ -504,6 +580,7 @@ io.on('connection', (socket) => {
       if (!room) throw new Error('Комната не найдена');
       socket.join(room.id);
       const message = roomManager.addRoomMessage(room.id, { socketId: socket.id, nickname: payload?.nickname, text: payload?.text });
+      saveState();
       ackOk(callback, { message, messages: roomManager.getRoomMessages(room.id), room: roomManager.serializeRoom(room) });
       emitRoomState(room.id);
     } catch (error) {
@@ -523,6 +600,7 @@ io.on('connection', (socket) => {
     try {
       const actor = requireAdmin(socket, payload);
       const item = roomManager.createPastTournament(payload, actor);
+      saveState();
       ackOk(callback, { tournament: item, tournaments: roomManager.getPastTournaments(payload?.game) });
       io.emit('past:update', { tournaments: roomManager.getPastTournaments(), changedGame: item.game });
     } catch (error) {
@@ -534,6 +612,7 @@ io.on('connection', (socket) => {
     try {
       const actor = requireAdmin(socket, payload);
       const removed = roomManager.deletePastTournament(payload?.id, actor);
+      saveState();
       ackOk(callback, { tournament: removed, tournaments: roomManager.getPastTournaments(payload?.game) });
       io.emit('past:update', { tournaments: roomManager.getPastTournaments(), changedGame: removed.game });
     } catch (error) {
@@ -547,6 +626,7 @@ io.on('connection', (socket) => {
       const room = roomManager.getRoom(payload?.roomId);
       if (!valid) throw new Error('Неверный пароль');
       const roomAccessToken = grantRoomAccess(socket, room);
+      saveState();
       ackOk(callback, { roomAccessToken });
     } catch (error) {
       ackError(callback, error);
@@ -561,6 +641,7 @@ io.on('connection', (socket) => {
       if (!room) throw new Error('Комната не найдена');
       socket.join(room.id);
       const roomAccessToken = resumedSession ? grantRoomAccess(socket, room) : '';
+      if (resumedSession || roomAccessToken) saveState();
       ackOk(callback, { room: roomManager.serializeRoom(room), playerSessionToken: resumedSession?.token || '', roomAccessToken });
     } catch (error) {
       ackError(callback, error);
@@ -680,8 +761,11 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log(`Socket disconnected: ${socket.id}`);
     const updatedRoomIds = roomManager.handleDisconnect(socket.id);
-    updatedRoomIds.forEach(emitRoomState);
-    if (updatedRoomIds.length > 0) emitRoomsList();
+    if (updatedRoomIds.length > 0) {
+      saveState();
+      updatedRoomIds.forEach(emitRoomState);
+      emitRoomsList();
+    }
   });
 });
 

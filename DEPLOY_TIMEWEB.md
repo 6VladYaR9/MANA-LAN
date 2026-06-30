@@ -30,6 +30,14 @@ cp server/.env.example server/.env
 nano server/.env
 ```
 
+Создай директорию для runtime-state: комнаты, сетка, чаты, короткоживущие room/player-токены.
+
+```bash
+mkdir -p /var/lib/manalan
+chown -R $(whoami):$(whoami) /var/lib/manalan
+chmod 700 /var/lib/manalan
+```
+
 Минимальные production-настройки:
 
 ```env
@@ -39,6 +47,9 @@ CLIENT_URL=https://manalan.ru,https://www.manalan.ru
 ADMIN_LOGIN=your-private-login
 ADMIN_PASSWORD_SALT=generated-salt
 ADMIN_PASSWORD_HASH=generated-hash
+DATA_DIR=/var/lib/manalan
+BRACKET_FETCH_TIMEOUT_MS=3000
+BRACKET_CACHE_TTL_MS=60000
 ```
 
 Сгенерировать salt/hash для пароля:
