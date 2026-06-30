@@ -6,11 +6,12 @@ import SideOperatives from './SideOperatives';
 import Veto from './Veto';
 import { socket } from '../socket';
 import { getRoomAccessToken, setRoomAccessToken } from '../roomAccess';
+import { getPlayerSessionToken, setPlayerSessionToken } from '../playerSession';
 import type { Player, Room as RoomType, SocketAck, Stage, Team } from '../types';
 import './Room.css';
 
-type RoomPayload = { room: RoomType; roomAccessToken?: string };
-type JoinAck = SocketAck<RoomPayload & { playerId: string }>;
+type RoomPayload = { room: RoomType; roomAccessToken?: string; playerSessionToken?: string };
+type JoinAck = SocketAck<RoomPayload & { playerId: string; playerSessionToken?: string }>;
 type RoomPasswordAck = SocketAck<{ roomAccessToken?: string }>;
 
 function stageLabel(stage: Stage) {
@@ -69,7 +70,12 @@ export default function Room({
 
     socket.emit(
       'room:get',
-      { roomId, adminToken, roomAccessToken: tokenOverride ?? getRoomAccessToken(roomId) },
+      {
+        roomId,
+        adminToken,
+        roomAccessToken: tokenOverride ?? getRoomAccessToken(roomId),
+        playerSessionToken: getPlayerSessionToken(roomId)
+      },
       (response: SocketAck<RoomPayload>) => {
         if (!response.ok) {
           if (response.error === 'ROOM_PASSWORD_REQUIRED') {
@@ -82,6 +88,7 @@ export default function Room({
           return;
         }
         if (response.roomAccessToken) setRoomAccessToken(roomId, response.roomAccessToken);
+        if (response.playerSessionToken) setPlayerSessionToken(roomId, response.playerSessionToken);
         setAccessRequired(false);
         setAccessPassword('');
         setRoom(response.room);
@@ -102,11 +109,18 @@ export default function Room({
       if (payload.roomId === roomId) navigate('/');
     };
 
+    const onReconnect = () => {
+      setSocketId(socket.id || '');
+      loadRoom();
+    };
+
     socket.on('room:update', onRoomUpdate);
     socket.on('room:deleted', onRoomDeleted);
+    socket.on('connect', onReconnect);
     return () => {
       socket.off('room:update', onRoomUpdate);
       socket.off('room:deleted', onRoomDeleted);
+      socket.off('connect', onReconnect);
     };
   }, [loadRoom, navigate, roomId]);
 
@@ -134,6 +148,7 @@ export default function Room({
           return;
         }
         if (response.roomAccessToken) setRoomAccessToken(roomId, response.roomAccessToken);
+        if (response.playerSessionToken) setPlayerSessionToken(roomId, response.playerSessionToken);
         setRoom(response.room);
       }
     );
