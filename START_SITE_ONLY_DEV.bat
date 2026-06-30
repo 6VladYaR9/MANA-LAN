@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-cd /d "C:\cs2-lanonline"
+cd /d "%~dp0"
 
 call npm run dev
 

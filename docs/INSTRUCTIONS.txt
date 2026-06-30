@@ -35,7 +35,7 @@ npm config set registry https://registry.npmjs.org/
 Шаг 5. Скопируй env-файл:
 copy .env.example server\.env
 
-Шаг 6. Установи зависимости:
+Шаг 6. Установи зависимости. Команда сохраняет и использует package-lock файлы, чтобы версии зависимостей были воспроизводимыми:
 npm run install:all
 
 Шаг 7. Запусти сайт и backend:

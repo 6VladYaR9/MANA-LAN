@@ -2,11 +2,7 @@
 
 ## Запуск на Windows
 
-Папка проекта на компьютере:
-
-```cmd
-C:\cs2-lanonline
-```
+Папка проекта может лежать в любом удобном месте на компьютере.
 
 Рабочий батник:
 
@@ -17,7 +13,7 @@ START_MANA_SITE.bat
 Он выполняет:
 
 ```cmd
-cd /d "C:\cs2-lanonline"
+cd /d "%~dp0"
 npm config set registry https://registry.npmjs.org/
 npm run install:all
 npm run dev
