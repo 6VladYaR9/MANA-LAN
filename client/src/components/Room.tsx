@@ -1,15 +1,17 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import ManaLogo from './ManaLogo';
 import RoomChat from './RoomChat';
 import SideOperatives from './SideOperatives';
 import Veto from './Veto';
 import { socket } from '../socket';
+import { getRoomAccessToken, setRoomAccessToken } from '../roomAccess';
 import type { Player, Room as RoomType, SocketAck, Stage, Team } from '../types';
 import './Room.css';
 
-type RoomPayload = { room: RoomType };
+type RoomPayload = { room: RoomType; roomAccessToken?: string };
 type JoinAck = SocketAck<RoomPayload & { playerId: string }>;
+type RoomPasswordAck = SocketAck<{ roomAccessToken?: string }>;
 
 function stageLabel(stage: Stage) {
   if (stage === 'lobby') return 'СБОР ИГРОКОВ';
@@ -50,6 +52,8 @@ export default function Room({
   const [team, setTeam] = useState<'auto' | Team>('auto');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  const [accessRequired, setAccessRequired] = useState(false);
+  const [accessPassword, setAccessPassword] = useState('');
 
   useEffect(() => {
     const onConnect = () => setSocketId(socket.id || '');
@@ -60,16 +64,35 @@ export default function Room({
     };
   }, []);
 
+  const loadRoom = useCallback((tokenOverride?: string) => {
+    if (!roomId) return;
+
+    socket.emit(
+      'room:get',
+      { roomId, adminToken, roomAccessToken: tokenOverride ?? getRoomAccessToken(roomId) },
+      (response: SocketAck<RoomPayload>) => {
+        if (!response.ok) {
+          if (response.error === 'ROOM_PASSWORD_REQUIRED') {
+            setRoom(null);
+            setAccessRequired(true);
+            setError('');
+            return;
+          }
+          setError(response.error);
+          return;
+        }
+        if (response.roomAccessToken) setRoomAccessToken(roomId, response.roomAccessToken);
+        setAccessRequired(false);
+        setAccessPassword('');
+        setRoom(response.room);
+      }
+    );
+  }, [adminToken, roomId]);
+
   useEffect(() => {
     if (!roomId) return;
 
-    socket.emit('room:get', { roomId }, (response: SocketAck<RoomPayload>) => {
-      if (!response.ok) {
-        setError(response.error);
-        return;
-      }
-      setRoom(response.room);
-    });
+    loadRoom();
 
     const onRoomUpdate = (payload: RoomPayload) => {
       if (payload.room.id === roomId) setRoom(payload.room);
@@ -85,7 +108,7 @@ export default function Room({
       socket.off('room:update', onRoomUpdate);
       socket.off('room:deleted', onRoomDeleted);
     };
-  }, [roomId]);
+  }, [loadRoom, navigate, roomId]);
 
   const currentPlayer = useMemo<Player | null>(() => {
     if (!room || !socketId) return null;
@@ -103,13 +126,14 @@ export default function Room({
         roomId,
         name: nickname,
         team: team === 'auto' ? null : team,
-        password: sessionStorage.getItem(`room-password:${roomId}`) || ''
+        roomAccessToken: getRoomAccessToken(roomId)
       },
       (response: JoinAck) => {
         if (!response.ok) {
           setError(response.error);
           return;
         }
+        if (response.roomAccessToken) setRoomAccessToken(roomId, response.roomAccessToken);
         setRoom(response.room);
       }
     );
@@ -165,6 +189,55 @@ export default function Room({
       setCopied(`Скопируй вручную: ${command}`);
     }
   };
+
+  const submitAccessPassword = (event: FormEvent) => {
+    event.preventDefault();
+    if (!roomId) return;
+    setError('');
+
+    socket.emit('room:checkPassword', { roomId, password: accessPassword }, (response: RoomPasswordAck) => {
+      if (!response.ok) {
+        setError(response.error);
+        return;
+      }
+      const token = response.roomAccessToken || '';
+      setRoomAccessToken(roomId, token);
+      loadRoom(token);
+    });
+  };
+
+  if (accessRequired) {
+    return (
+      <>
+        <SideOperatives />
+        <main className="appShell roomPage hasDecor">
+          <header className="topBar roomTopBar">
+            <ManaLogo />
+            <Link className="backButton" to="/">в†ђ РќР°Р·Р°Рґ РІ С…Р°Р±</Link>
+          </header>
+          <section className="roomPanel joinPanel">
+            <div>
+              <span className="panelLabel">РџР°СЂРѕР»СЊ РєРѕРјРЅР°С‚С‹</span>
+              <h2>Р—Р°РєСЂС‹С‚С‹Р№ РјР°С‚С‡</h2>
+              <p className="muted">Р’РІРµРґРё РїР°СЂРѕР»СЊ, С‡С‚РѕР±С‹ РѕС‚РєСЂС‹С‚СЊ РєРѕРјРЅР°С‚Сѓ.</p>
+            </div>
+            <form className="joinForm" onSubmit={submitAccessPassword}>
+              <input
+                autoFocus
+                type="password"
+                value={accessPassword}
+                onChange={(event) => setAccessPassword(event.target.value)}
+                placeholder="РџР°СЂРѕР»СЊ"
+                required
+              />
+              <button type="submit">РћС‚РєСЂС‹С‚СЊ</button>
+            </form>
+          </section>
+          {error && <div className="errorBox">{error}</div>}
+        </main>
+      </>
+    );
+  }
 
   if (!room) {
     return (
@@ -275,7 +348,16 @@ export default function Room({
           <TeamColumn room={room} team="B" currentPlayer={currentPlayer} onTransferCaptain={transferCaptain} />
         </section>
 
-        <RoomChat room={room} nickname={nickname} onError={setError} onRoomUpdate={setRoom} />
+        <RoomChat
+          room={room}
+          nickname={nickname}
+          onError={setError}
+          onRoomUpdate={setRoom}
+          onAccessRequired={() => {
+            setRoom(null);
+            setAccessRequired(true);
+          }}
+        />
 
         {room.stage === 'lobby' && (
           <section className="roomPanel hintPanel">
@@ -296,7 +378,7 @@ export default function Room({
         )}
 
         {(room.stage === 'live' || room.stage === 'finished') && (
-          <MatchControl room={room} isAdmin={isAdmin} adminToken={adminToken} onError={setError} onRoomUpdate={setRoom} />
+          <MatchControl room={room} currentPlayer={currentPlayer} isAdmin={isAdmin} adminToken={adminToken} onError={setError} onRoomUpdate={setRoom} />
         )}
       </main>
     </>
@@ -412,12 +494,14 @@ function MatchStatsPanel({ room }: { room: RoomType }) {
 
 function MatchControl({
   room,
+  currentPlayer,
   isAdmin,
   adminToken,
   onError,
   onRoomUpdate
 }: {
   room: RoomType;
+  currentPlayer: Player | null;
   isAdmin: boolean;
   adminToken: string;
   onError: (message: string) => void;
@@ -427,9 +511,21 @@ function MatchControl({
   const [replaceIndex, setReplaceIndex] = useState<number | null>(null);
   const screenshotLimit = room.matchFormat === 'BO3' ? 3 : 1;
   const screenshots = room.resultScreenshots?.length ? room.resultScreenshots : (room.resultScreenshot ? [room.resultScreenshot] : []);
-  const canUploadScreenshot = screenshots.length < screenshotLimit;
+  const canSubmitScreenshot = isAdmin || Boolean(currentPlayer);
+  const canReplaceScreenshot = isAdmin;
+  const canUploadScreenshot = canSubmitScreenshot && screenshots.length < screenshotLimit;
 
   const sendScreenshot = (file: File, index: number | null = null) => {
+    if (!canSubmitScreenshot) {
+      onError('Загружать скриншоты могут только игроки матча и админ.');
+      return;
+    }
+
+    if (index !== null && !canReplaceScreenshot) {
+      onError('Заменять скриншоты может только админ.');
+      return;
+    }
+
     if (!file.type.match(/^image\/(png|jpeg|jpg|webp)$/)) {
       onError('Разрешены только PNG, JPG или WEBP.');
       return;
@@ -450,7 +546,7 @@ function MatchControl({
     reader.onload = () => {
       socket.emit(
         'match:uploadScreenshot',
-        { roomId: room.id, dataUrl: String(reader.result || ''), replaceIndex: index, adminToken },
+        { roomId: room.id, dataUrl: String(reader.result || ''), replaceIndex: index, adminToken, roomAccessToken: getRoomAccessToken(room.id) },
         (response: SocketAck<RoomPayload>) => {
           setUploading(false);
           setReplaceIndex(null);
@@ -471,11 +567,13 @@ function MatchControl({
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
+      if (!canSubmitScreenshot) return;
       if (room.stage !== 'live' && room.stage !== 'finished') return;
       const items = Array.from(event.clipboardData?.items || []);
       const imageItem = items.find((item) => item.type.startsWith('image/'));
       const file = imageItem?.getAsFile();
       if (!file) return;
+      if (screenshots.length >= screenshotLimit && !canReplaceScreenshot) return;
       event.preventDefault();
       const targetIndex = screenshots.length >= screenshotLimit ? Math.max(0, screenshotLimit - 1) : null;
       sendScreenshot(file, targetIndex);
@@ -483,7 +581,7 @@ function MatchControl({
 
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [room.id, room.stage, screenshots.length, screenshotLimit, canUploadScreenshot, adminToken]);
+  }, [room.id, room.stage, screenshots.length, screenshotLimit, canUploadScreenshot, canReplaceScreenshot, canSubmitScreenshot, adminToken]);
 
   const uploadScreenshot = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -513,12 +611,18 @@ function MatchControl({
 
       <div className="screenshotBox screenshotBoxWide">
         <span className="panelLabel">Скриншоты результата {screenshots.length}/{screenshotLimit}</span>
+        {canSubmitScreenshot && (canUploadScreenshot || replaceIndex !== null) && (
         <label className={`uploadLabel ${!canUploadScreenshot && replaceIndex === null ? 'uploadLabelDisabled' : ''}`}>
           {uploading ? 'Загружаю...' : replaceIndex !== null ? `Заменить скриншот ${replaceIndex + 1}` : 'Загрузить изображение'}
           <input type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadScreenshot} />
         </label>
-        <p className="muted">Можно вставить скриншот через Ctrl+V. Если лимит заполнен, вставка заменит последний скриншот.</p>
-        {replaceIndex !== null && <button type="button" className="ghostBtn" onClick={() => setReplaceIndex(null)}>Отменить замену</button>}
+        )}
+        {canSubmitScreenshot ? (
+          <p className="muted">{canReplaceScreenshot ? 'Можно вставить скриншот через Ctrl+V. Если лимит заполнен, вставка заменит последний скриншот.' : 'Игроки матча могут добавить скриншот до заполнения лимита.'}</p>
+        ) : (
+          <p className="muted adminOnlyNotice">Скриншоты загружают только игроки матча и админ.</p>
+        )}
+        {replaceIndex !== null && canReplaceScreenshot && <button type="button" className="ghostBtn" onClick={() => setReplaceIndex(null)}>Отменить замену</button>}
 
         {screenshots.length > 0 ? (
           <div className="screenshotsGrid">
@@ -527,7 +631,7 @@ function MatchControl({
                 <img src={screenshot} alt={`Скриншот результата ${index + 1}`} />
                 <figcaption>
                   Карта {index + 1}
-                  <button type="button" className="ghostBtn replaceShotButton" onClick={() => setReplaceIndex(index)}>Заменить</button>
+                  {canReplaceScreenshot && <button type="button" className="ghostBtn replaceShotButton" onClick={() => setReplaceIndex(index)}>Заменить</button>}
                 </figcaption>
               </figure>
             ))}

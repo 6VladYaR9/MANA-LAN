@@ -24,6 +24,21 @@ function verifyAdmin(login, password) {
   return safeEqualHex(hashPassword(password, salt), expectedHash);
 }
 
+function validateAdminConfig() {
+  if (process.env.NODE_ENV !== 'production') return;
+
+  const login = process.env.ADMIN_LOGIN;
+  const hash = process.env.ADMIN_PASSWORD_HASH;
+  const salt = process.env.ADMIN_PASSWORD_SALT;
+  if (!login || !hash || !salt) {
+    throw new Error('ADMIN_LOGIN, ADMIN_PASSWORD_HASH, and ADMIN_PASSWORD_SALT are required in production. Default admin credentials are disabled.');
+  }
+
+  if (login === DEFAULT_LOGIN || hash === DEFAULT_HASH || salt === DEFAULT_SALT) {
+    throw new Error('Production cannot use bundled default admin credentials. Set non-default ADMIN_LOGIN, ADMIN_PASSWORD_HASH, and ADMIN_PASSWORD_SALT.');
+  }
+}
+
 function createToken() {
   return crypto.randomBytes(32).toString('hex');
 }
@@ -31,6 +46,7 @@ function createToken() {
 module.exports = {
   verifyAdmin,
   createToken,
+  validateAdminConfig,
   hashPassword,
   DEFAULT_LOGIN,
   DEFAULT_SALT,
