@@ -15,6 +15,7 @@ const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || (process.env.NODE_ENV === 'production' ? '127.0.0.1' : '0.0.0.0');
 const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const ROOM_ACCESS_TTL_MS = 1000 * 60 * 60 * 12;
+const PLAYER_SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const ADMIN_ROOM = 'admins';
 const ADMIN_LOGIN_MAX_ATTEMPTS = Math.max(1, Number.parseInt(process.env.ADMIN_LOGIN_MAX_ATTEMPTS || '5', 10));
 const ADMIN_LOGIN_WINDOW_MS = Math.max(1000, Number.parseInt(process.env.ADMIN_LOGIN_WINDOW_MS || '60000', 10));
@@ -38,6 +39,7 @@ const server = http.createServer(app);
 const roomManager = new RoomManager();
 const adminSessions = new Map();
 const roomAccessTokens = new Map();
+const playerSessions = new Map();
 const adminLoginFailures = new Map();
 
 app.use(cors({ origin: CLIENT_ORIGINS }));
@@ -208,6 +210,52 @@ function validateRoomAccessToken(roomId, token) {
   return true;
 }
 
+function rememberPlayerSession(socket, roomId, token) {
+  socket.data.playerSessionTokens ||= {};
+  socket.data.playerSessionTokens[roomId] = token;
+}
+
+function readPlayerSessionToken(socket, payload = {}) {
+  const roomId = payload?.roomId;
+  return String(payload?.playerSessionToken || socket.data.playerSessionTokens?.[roomId] || '').trim();
+}
+
+function validatePlayerSession(roomId, token) {
+  if (!token) return null;
+  const session = playerSessions.get(token);
+  if (!session || session.roomId !== roomId) return null;
+  if (session.expiresAt < Date.now()) {
+    playerSessions.delete(token);
+    return null;
+  }
+  session.expiresAt = Date.now() + PLAYER_SESSION_TTL_MS;
+  return session;
+}
+
+function grantPlayerSession(socket, room, player) {
+  if (!room || !player) return '';
+  const token = createToken();
+  playerSessions.set(token, {
+    roomId: room.id,
+    playerId: player.id,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + PLAYER_SESSION_TTL_MS
+  });
+  rememberPlayerSession(socket, room.id, token);
+  return token;
+}
+
+function resumePlayerSession(socket, room, payload = {}) {
+  if (!room) return null;
+  const token = readPlayerSessionToken(socket, payload);
+  const session = validatePlayerSession(room.id, token);
+  if (!session) return null;
+
+  const player = roomManager.resumePlayer(room.id, session.playerId, socket.id);
+  rememberPlayerSession(socket, room.id, token);
+  return { player, token };
+}
+
 function grantRoomAccess(socket, room) {
   if (!room?.hasPassword) return '';
   const token = createToken();
@@ -224,6 +272,7 @@ function hasRoomAccess(socket, room, payload = {}) {
   if (!room?.hasPassword) return true;
   if (isAdmin(socket, payload)) return true;
   if (room.players.some((player) => player.socketId === socket.id)) return true;
+  if (validatePlayerSession(room.id, readPlayerSessionToken(socket, payload))) return true;
 
   const token = readRoomAccessToken(socket, payload);
   if (validateRoomAccessToken(room.id, token)) {
@@ -507,10 +556,12 @@ io.on('connection', (socket) => {
   socket.on('room:get', (payload, callback) => {
     try {
       const room = roomManager.getRoom(payload?.roomId);
+      const resumedSession = resumePlayerSession(socket, room, payload);
       assertRoomAccess(socket, room, payload);
       if (!room) throw new Error('Комната не найдена');
       socket.join(room.id);
-      ackOk(callback, { room: roomManager.serializeRoom(room) });
+      const roomAccessToken = resumedSession ? grantRoomAccess(socket, room) : '';
+      ackOk(callback, { room: roomManager.serializeRoom(room), playerSessionToken: resumedSession?.token || '', roomAccessToken });
     } catch (error) {
       ackError(callback, error);
     }
@@ -524,7 +575,8 @@ io.on('connection', (socket) => {
       socket.join(payload.roomId);
       const room = roomManager.getRoom(payload.roomId);
       const roomAccessToken = grantRoomAccess(socket, room);
-      ackOk(callback, { playerId: player.id, room: roomManager.serializeRoom(room), roomAccessToken });
+      const playerSessionToken = grantPlayerSession(socket, room, player);
+      ackOk(callback, { playerId: player.id, room: roomManager.serializeRoom(room), roomAccessToken, playerSessionToken });
       emitAfterRoomChange(payload.roomId);
     } catch (error) {
       ackError(callback, error);

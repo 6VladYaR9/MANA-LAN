@@ -467,6 +467,18 @@ class RoomManager {
     return removedPlayer;
   }
 
+  resumePlayer(roomId, playerId, socketId) {
+    const room = this.getRoom(roomId);
+    if (!room) throw new Error('Комната не найдена');
+    const player = room.players.find((item) => item.id === playerId);
+    if (!player) throw new Error('Игрок не найден');
+
+    player.socketId = socketId;
+    player.connected = true;
+    this.ensureCaptain(room, player.team);
+    return player;
+  }
+
   transferCaptain(roomId, socketId, targetPlayerId) {
     const room = this.getRoom(roomId);
     if (!room) throw new Error('Комната не найдена');
@@ -909,11 +921,7 @@ class RoomManager {
 
       const affectedTeam = room.players[playerIndex].team;
 
-      if (room.stage === 'lobby') {
-        room.players.splice(playerIndex, 1);
-      } else {
-        room.players[playerIndex].connected = false;
-      }
+      room.players[playerIndex].connected = false;
 
       this.ensureCaptain(room, affectedTeam);
       updatedRoomIds.push(room.id);

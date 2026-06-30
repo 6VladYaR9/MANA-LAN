@@ -34,6 +34,10 @@ function teamSide(team: Team) {
 }
 
 function captainForTeam(room: Room, team: Team) {
+  const captainId = room.captains?.[team];
+  const savedCaptain = captainId ? room.players.find((player) => player.id === captainId && player.team === team) : null;
+  if (savedCaptain) return savedCaptain;
+
   return room.players
     .filter((player) => player.team === team)
     .sort((a, b) => a.slot - b.slot || a.joinedAt - b.joinedAt)[0];
