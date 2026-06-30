@@ -3,11 +3,13 @@ import { Link, useNavigate } from 'react-router-dom';
 import ManaLogo from './ManaLogo';
 import SideOperatives from './SideOperatives';
 import { socket } from '../socket';
+import { getRoomAccessToken, setRoomAccessToken } from '../roomAccess';
 import type { Club, GameType, MatchFormat, RoomSummary, SocketAck } from '../types';
 import './Hub.css';
 
 type RoomsPayload = { rooms: RoomSummary[] };
-type CreateRoomAck = SocketAck<{ room: { id: string } }>;
+type CreateRoomAck = SocketAck<{ room: { id: string }; roomAccessToken?: string }>;
+type RoomPasswordAck = SocketAck<{ roomAccessToken?: string }>;
 type Mode = 1 | 2 | 5;
 
 const CS2_MODES: Array<{ value: Mode; title: string; subtitle: string; button: string }> = [
@@ -109,7 +111,7 @@ export default function Hub({
   const connectToRoom = (room: RoomSummary) => {
     setError('');
 
-    if (room.hasPassword && room.stage !== 'finished') {
+    if (room.hasPassword && !isAdmin && !getRoomAccessToken(room.id)) {
       setPasswordModal({ roomId: room.id, password: '', error: '' });
       return;
     }
@@ -124,13 +126,13 @@ export default function Hub({
     socket.emit(
       'room:checkPassword',
       { roomId: passwordModal.roomId, password: passwordModal.password },
-      (response: SocketAck) => {
+      (response: RoomPasswordAck) => {
         if (!response.ok) {
           setPasswordModal({ ...passwordModal, error: response.error });
           return;
         }
 
-        sessionStorage.setItem(`room-password:${passwordModal.roomId}`, passwordModal.password);
+        setRoomAccessToken(passwordModal.roomId, response.roomAccessToken || '');
         navigate(`/room/${passwordModal.roomId}`);
       }
     );
@@ -250,8 +252,8 @@ export default function Hub({
             adminToken={adminToken}
             mode={createModal}
             onClose={() => setCreateModal(null)}
-            onCreated={(roomId, password) => {
-              if (password) sessionStorage.setItem(`room-password:${roomId}`, password);
+            onCreated={(roomId, roomAccessToken) => {
+              setRoomAccessToken(roomId, roomAccessToken);
               navigate(`/room/${roomId}`);
             }}
             onError={setError}
@@ -383,7 +385,7 @@ function CreateMatchModal({
   adminToken: string;
   mode: Mode;
   onClose: () => void;
-  onCreated: (roomId: string, password: string) => void;
+  onCreated: (roomId: string, roomAccessToken: string) => void;
   onError: (message: string) => void;
 }) {
   const [club, setClub] = useState<Club>('ЮЗ');
@@ -425,7 +427,7 @@ function CreateMatchModal({
           return;
         }
 
-        onCreated(response.room.id, password.trim());
+        onCreated(response.room.id, response.roomAccessToken || '');
       }
     );
   };

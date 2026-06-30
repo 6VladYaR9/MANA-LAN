@@ -250,34 +250,39 @@ class RoomManager {
   }
 
   getPublicRooms() {
-    return this.rooms.map((room) => ({
-      id: room.id,
-      game: room.game || 'cs2',
-      teamAName: room.teamAName,
-      teamBName: room.teamBName,
-      club: room.club,
-      matchFormat: room.matchFormat,
-      targetMaps: room.targetMaps,
-      hasPassword: room.hasPassword,
-      stage: room.stage,
-      status: this.getStatus(room),
-      playersCount: room.players.length,
-      teamSize: room.teamSize,
-      maxPlayers: room.maxPlayers,
-      selectedMap: room.selectedMaps[room.selectedMaps.length - 1]?.map || room.veto?.selectedMap || null,
-      selectedMaps: room.selectedMaps,
-      gameServerAddress: room.gameServerAddress,
-      gotvAddress: room.gotvAddress,
-      assignedServer: room.assignedServer,
-      score: room.score,
-      mapScores: this.ensureMapScores(room),
-      winnerTeam: room.winnerTeam,
-      winnerName: room.winnerName,
-      resultScreenshot: room.resultScreenshot || (Array.isArray(room.resultScreenshots) ? room.resultScreenshots[0] : null),
-      resultScreenshots: Array.isArray(room.resultScreenshots) ? room.resultScreenshots : (room.resultScreenshot ? [room.resultScreenshot] : []),
-      finishedAt: room.finishedAt,
-      createdAt: room.createdAt
-    }));
+    return this.rooms.map((room) => {
+      const locked = Boolean(room.hasPassword);
+      const screenshots = Array.isArray(room.resultScreenshots) ? room.resultScreenshots : (room.resultScreenshot ? [room.resultScreenshot] : []);
+
+      return {
+        id: room.id,
+        game: room.game || 'cs2',
+        teamAName: room.teamAName,
+        teamBName: room.teamBName,
+        club: room.club,
+        matchFormat: room.matchFormat,
+        targetMaps: room.targetMaps,
+        hasPassword: room.hasPassword,
+        stage: room.stage,
+        status: this.getStatus(room),
+        playersCount: room.players.length,
+        teamSize: room.teamSize,
+        maxPlayers: room.maxPlayers,
+        selectedMap: room.selectedMaps[room.selectedMaps.length - 1]?.map || room.veto?.selectedMap || null,
+        selectedMaps: room.selectedMaps,
+        gameServerAddress: locked ? 'LOCKED' : room.gameServerAddress,
+        gotvAddress: locked ? 'LOCKED' : room.gotvAddress,
+        assignedServer: locked ? null : room.assignedServer,
+        score: room.score,
+        mapScores: this.ensureMapScores(room),
+        winnerTeam: room.winnerTeam,
+        winnerName: room.winnerName,
+        resultScreenshot: locked ? null : (room.resultScreenshot || screenshots[0] || null),
+        resultScreenshots: locked ? [] : screenshots,
+        finishedAt: room.finishedAt,
+        createdAt: room.createdAt
+      };
+    });
   }
 
   checkPassword(roomId, password) {
@@ -368,10 +373,10 @@ class RoomManager {
     return slots;
   }
 
-  addPlayer(roomId, { socketId, name, team, password }) {
+  addPlayer(roomId, { socketId, name, team, password, skipPasswordCheck = false }) {
     const room = this.getRoom(roomId);
     if (!room) throw new Error('Комната не найдена');
-    if (!this.checkPassword(roomId, password)) throw new Error('Неверный пароль');
+    if (!skipPasswordCheck && !this.checkPassword(roomId, password)) throw new Error('Неверный пароль');
 
     if (room.stage !== 'lobby') {
       throw new Error('Матч уже начался. Новые игроки не могут занимать слот, но комнату можно смотреть.');

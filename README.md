@@ -1,78 +1,60 @@
 # MANA CS2 / Dota 2 Match Hub
 
-## Запуск на Windows
+## Windows Dev Start
 
-Папка проекта может лежать в любом удобном месте на компьютере.
-
-Рабочий батник:
+Run the full dev stack:
 
 ```cmd
 START_MANA_SITE.bat
 ```
 
-Он выполняет:
-
-```cmd
-cd /d "%~dp0"
-npm config set registry https://registry.npmjs.org/
-npm run install:all
-npm run dev
-```
-
-После запуска сайт откроется на локальном адресе Vite, обычно:
+The script installs dependencies and starts:
 
 ```text
-http://localhost:5173
+Frontend: http://localhost:5173
+Backend:  http://localhost:3001
 ```
 
-Backend работает на:
-
-```text
-http://localhost:3001
-```
-
-## Быстрый запуск без установки зависимостей каждый раз
-
-Если `npm run install:all` уже был выполнен, можно запускать:
+If dependencies are already installed, use:
 
 ```cmd
 START_SITE_ONLY_DEV.bat
 ```
 
-## Админка
+## Admin Credentials
 
-Адрес:
+Admin login is checked on the backend. Do not deploy with bundled development credentials.
 
-```text
-/admin
+For production, create `server/.env` from `server/.env.example`, choose a non-default `ADMIN_LOGIN`, and generate `ADMIN_PASSWORD_SALT` plus `ADMIN_PASSWORD_HASH`:
+
+```bash
+node -e "const { randomBytes, pbkdf2Sync } = require('crypto'); const password = process.argv[1]; const salt = randomBytes(16).toString('hex'); const hash = pbkdf2Sync(password, salt, 120000, 32, 'sha256').toString('hex'); console.log(`ADMIN_PASSWORD_SALT=${salt}\nADMIN_PASSWORD_HASH=${hash}`);" "YOUR_STRONG_PASSWORD"
 ```
 
-Логин:
+In `NODE_ENV=production`, the server refuses to start if admin credentials are missing or still equal to the bundled defaults.
+
+## Environment
+
+Example config:
 
 ```text
-admin
+server/.env.example
 ```
 
-Пароль:
+Production behind Caddy should use:
 
-```text
-manakirov2026
+```env
+HOST=127.0.0.1
+CLIENT_URL=https://manalan.ru,https://www.manalan.ru
 ```
 
-Пароль проверяется на backend. В frontend пароль не лежит.
+Use `CLIENT_URL=*` only for trusted local LAN development, never for public deployment.
 
-## .env
+## Verification
 
-Файл настроек лежит здесь:
-
-```text
-server\.env.example
+```bash
+npm run ci:install
+npm run verify
 ```
 
-Можно скопировать его в:
-
-```text
-server\.env
-```
-
-В текущей версии сайт работает и без копирования `.env`, потому что значения по умолчанию уже есть на сервере.
+`verify` runs server security tests and then builds the frontend.

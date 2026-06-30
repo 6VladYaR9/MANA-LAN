@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { socket } from '../socket';
+import { getRoomAccessToken } from '../roomAccess';
 import type { ChatMessage, Room, SocketAck } from '../types';
 import './FloatingChat.css';
 import './RoomChat.css';
@@ -18,12 +19,14 @@ export default function RoomChat({
   room,
   nickname,
   onError,
-  onRoomUpdate
+  onRoomUpdate,
+  onAccessRequired
 }: {
   room: Room;
   nickname: string;
   onError: (message: string) => void;
   onRoomUpdate: (room: Room) => void;
+  onAccessRequired: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [lastSeenCount, setLastSeenCount] = useState((room.chatMessages || []).length);
@@ -55,9 +58,13 @@ export default function RoomChat({
     onError('');
     socket.emit(
       'chat:room:send',
-      { roomId: room.id, nickname, text: cleanText },
+      { roomId: room.id, nickname, text: cleanText, roomAccessToken: getRoomAccessToken(room.id) },
       (response: SocketAck<RoomPayload>) => {
         if (!response.ok) {
+          if (response.error === 'ROOM_PASSWORD_REQUIRED') {
+            onAccessRequired();
+            return;
+          }
           onError(response.error);
           return;
         }
