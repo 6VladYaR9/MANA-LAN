@@ -26,7 +26,7 @@ unzip mana-site.zip
 
 ```bash
 cd /var/www/manalan
-npm run install:all
+npm run ci:install
 ```
 
 ## 3. Создать server/.env
@@ -53,7 +53,7 @@ npm run build
 ## 5. Запустить сайт через PM2
 
 ```bash
-pm2 start "npm start" --name manalan
+pm2 start npm --name manalan -- start
 pm2 save
 pm2 startup
 ```

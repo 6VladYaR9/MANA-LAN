@@ -6,6 +6,7 @@ client/dist/
 server/.env
 *.log
 npm-debug.log*
+*.tsbuildinfo
 .DS_Store
 uploads/
 backups/
