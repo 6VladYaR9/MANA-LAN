@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
+const fs = require('node:fs');
 const net = require('node:net');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { io: createClient } = require('socket.io-client');
@@ -30,6 +32,7 @@ function productionEnv(port, overrides = {}) {
     PORT: String(port),
     HOST: '127.0.0.1',
     CLIENT_URL: 'https://manalan.ru',
+    DATA_DIR: path.join(os.tmpdir(), 'mana-production-test-data'),
     ADMIN_LOGIN: 'secure-admin',
     ADMIN_PASSWORD_SALT: 'secure-salt',
     ADMIN_PASSWORD_HASH: NON_DEFAULT_HASH,
@@ -101,8 +104,13 @@ async function startServer(extraEnv = {}) {
     url,
     output,
     stop: async () => {
-      if (child.exitCode === null) child.kill();
-      await new Promise((resolve) => child.once('exit', resolve));
+      if (child.exitCode !== null) return;
+      const exited = new Promise((resolve) => child.once('exit', resolve));
+      child.kill();
+      if (process.platform === 'win32') {
+        spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      }
+      await exited;
     }
   };
 }
@@ -119,14 +127,36 @@ function connect(url) {
   });
 }
 
-function emit(socket, event, payload = {}) {
-  return new Promise((resolve) => socket.emit(event, payload, resolve));
+function emit(socket, event, payload) {
+  return new Promise((resolve) => {
+    if (payload === undefined) {
+      socket.emit(event, resolve);
+      return;
+    }
+    socket.emit(event, payload, resolve);
+  });
 }
 
 async function adminLogin(socket) {
   const response = await emit(socket, 'admin:login', { login: ADMIN_LOGIN, password: ADMIN_PASSWORD });
   assert.equal(response.ok, true);
   return response.token;
+}
+
+function waitForEvent(socket, event, timeoutMs = 200) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      socket.off(event, handler);
+      resolve(null);
+    }, timeoutMs);
+
+    function handler(payload) {
+      clearTimeout(timer);
+      resolve(payload);
+    }
+
+    socket.once(event, handler);
+  });
 }
 
 async function createRoom(socket, adminToken, overrides = {}) {
@@ -178,6 +208,25 @@ test('production startup refuses missing built client bundle', async () => {
   assert.match(result.output, /client build|index\.html/i);
 });
 
+test('production startup refuses implicit state file locations', async () => {
+  const port = await freePort();
+  const clientDist = fs.mkdtempSync(path.join(os.tmpdir(), 'mana-client-dist-'));
+  fs.writeFileSync(path.join(clientDist, 'index.html'), '<!doctype html>');
+  try {
+    const env = productionEnv(port, { CLIENT_DIST_PATH: clientDist });
+    delete env.DATA_DIR;
+    delete env.STATE_FILE;
+
+    const result = await runServerExpectExit(env);
+
+    assert.notEqual(result.exitCode, null, 'server kept running without DATA_DIR or STATE_FILE');
+    assert.notEqual(result.exitCode, 0);
+    assert.match(result.output, /DATA_DIR|STATE_FILE/i);
+  } finally {
+    fs.rmSync(clientDist, { recursive: true, force: true });
+  }
+});
+
 test('protected rooms require a room access token for state and chat', async () => {
   const server = await startServer();
   const sockets = [];
@@ -210,6 +259,363 @@ test('protected rooms require a room access token for state and chat', async () 
   } finally {
     sockets.forEach((socket) => socket.close());
     await server.stop();
+  }
+});
+
+test('admin logout revokes every socket using the same token from admin updates', async () => {
+  const server = await startServer();
+  const sockets = [];
+  try {
+    const admin = await connect(server.url);
+    const secondAdminTab = await connect(server.url);
+    const freshAdmin = await connect(server.url);
+    sockets.push(admin, secondAdminTab, freshAdmin);
+
+    const adminToken = await adminLogin(admin);
+    const checked = await emit(secondAdminTab, 'admin:check', { adminToken });
+    assert.equal(checked.ok, true);
+    assert.equal(checked.isAdmin, true);
+
+    const logout = await emit(admin, 'admin:logout', { adminToken });
+    assert.equal(logout.ok, true);
+
+    const freshToken = await adminLogin(freshAdmin);
+    const staleUpdate = waitForEvent(secondAdminTab, 'chat:admin:update', 250);
+    const sent = await emit(freshAdmin, 'chat:admin:send', { adminToken: freshToken, nickname: 'admin', text: 'after logout' });
+    assert.equal(sent.ok, true);
+
+    assert.equal(await staleUpdate, null);
+  } finally {
+    sockets.forEach((socket) => socket.close());
+    await server.stop();
+  }
+});
+
+test('expired room access tokens stop protected room update delivery', async () => {
+  const server = await startServer({ ROOM_ACCESS_TTL_MS: '50' });
+  const sockets = [];
+  try {
+    const admin = await connect(server.url);
+    const outsider = await connect(server.url);
+    sockets.push(admin, outsider);
+    const adminToken = await adminLogin(admin);
+    const room = await createRoom(admin, adminToken, { password: 'secret' });
+
+    const checked = await emit(outsider, 'room:checkPassword', { roomId: room.id, password: 'secret' });
+    assert.equal(checked.ok, true);
+    const joinedRead = await emit(outsider, 'room:get', { roomId: room.id, roomAccessToken: checked.roomAccessToken });
+    assert.equal(joinedRead.ok, true);
+
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    const staleUpdate = waitForEvent(outsider, 'room:update', 250);
+    const adminMessage = await emit(admin, 'chat:room:send', {
+      roomId: room.id,
+      adminToken,
+      nickname: 'admin',
+      text: 'private update after expiry'
+    });
+    assert.equal(adminMessage.ok, true);
+
+    assert.equal(await staleUpdate, null);
+  } finally {
+    sockets.forEach((socket) => socket.close());
+    await server.stop();
+  }
+});
+
+test('locked rooms redact sensitive public room metadata', async () => {
+  const server = await startServer();
+  const sockets = [];
+  try {
+    const admin = await connect(server.url);
+    sockets.push(admin);
+    const adminToken = await adminLogin(admin);
+    const room = await createRoom(admin, adminToken, {
+      password: 'secret',
+      teamAName: 'Secret Alpha',
+      teamBName: 'Secret Bravo'
+    });
+
+    const publicRooms = await emit(admin, 'rooms:get');
+    assert.equal(publicRooms.ok, true);
+    const publicRoom = publicRooms.rooms.find((item) => item.id === room.id);
+    assert.ok(publicRoom);
+    assert.equal(publicRoom.hasPassword, true);
+    assert.notEqual(publicRoom.teamAName, 'Secret Alpha');
+    assert.notEqual(publicRoom.teamBName, 'Secret Bravo');
+    assert.equal(publicRoom.selectedMaps.length, 0);
+    assert.deepEqual(publicRoom.score, { A: 0, B: 0 });
+    assert.equal(publicRoom.winnerName, '');
+    assert.equal(publicRoom.playersCount, 0);
+  } finally {
+    sockets.forEach((socket) => socket.close());
+    await server.stop();
+  }
+});
+
+test('room password checks are rate limited per room and client', async () => {
+  const server = await startServer({
+    ROOM_PASSWORD_MAX_ATTEMPTS: '2',
+    ROOM_PASSWORD_WINDOW_MS: '60000'
+  });
+  const sockets = [];
+  try {
+    const admin = await connect(server.url);
+    const outsider = await connect(server.url);
+    sockets.push(admin, outsider);
+    const adminToken = await adminLogin(admin);
+    const room = await createRoom(admin, adminToken, { password: 'secret' });
+
+    assert.equal((await emit(outsider, 'room:checkPassword', { roomId: room.id, password: 'bad-1' })).ok, false);
+    assert.equal((await emit(outsider, 'room:checkPassword', { roomId: room.id, password: 'bad-2' })).ok, false);
+    const blocked = await emit(outsider, 'room:checkPassword', { roomId: room.id, password: 'secret' });
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.error, /too many|СЃР»РёС€РєРѕРј/i);
+  } finally {
+    sockets.forEach((socket) => socket.close());
+    await server.stop();
+  }
+});
+
+test('new room passwords are persisted as salted hashes, not plaintext', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mana-password-hash-'));
+  const server = await startServer({ DATA_DIR: dataDir });
+  const sockets = [];
+  try {
+    const admin = await connect(server.url);
+    sockets.push(admin);
+    const adminToken = await adminLogin(admin);
+    const room = await createRoom(admin, adminToken, { password: 'secret-password' });
+
+    const state = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8'));
+    const persisted = state.rooms.find((item) => item.id === room.id);
+    assert.ok(persisted);
+    assert.equal(persisted.hasPassword, true);
+    assert.equal(persisted.password, '');
+    assert.match(persisted.passwordHash, /^[a-f0-9]{64}$/);
+    assert.match(persisted.passwordSalt, /^[a-f0-9]+$/);
+    assert.equal(JSON.stringify(persisted).includes('secret-password'), false);
+  } finally {
+    sockets.forEach((socket) => socket.close());
+    await server.stop();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('room join does not acknowledge success when persistence fails', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mana-save-fail-'));
+  const server = await startServer({ DATA_DIR: dataDir });
+  const sockets = [];
+  try {
+    const admin = await connect(server.url);
+    const player = await connect(server.url);
+    sockets.push(admin, player);
+    const adminToken = await adminLogin(admin);
+    const room = await createRoom(admin, adminToken);
+
+    const stateFile = path.join(dataDir, 'state.json');
+    fs.rmSync(stateFile, { force: true });
+    fs.mkdirSync(stateFile);
+
+    const joined = await emit(player, 'room:join', { roomId: room.id, name: 'No Durable Ack', team: 'A' });
+    assert.equal(joined.ok, false);
+    assert.match(joined.error, /EISDIR|state|save|persist/i);
+
+    const readBack = await emit(admin, 'room:get', { roomId: room.id, adminToken });
+    assert.equal(readBack.ok, true);
+    assert.equal(readBack.room.players.length, 0);
+  } finally {
+    sockets.forEach((socket) => socket.close());
+    await server.stop();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('failed admin login persistence rolls back the admin session', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mana-admin-save-fail-'));
+  const server = await startServer({ DATA_DIR: dataDir });
+  const socket = await connect(server.url);
+  try {
+    const stateFile = path.join(dataDir, 'state.json');
+    fs.mkdirSync(stateFile);
+
+    const login = await emit(socket, 'admin:login', { login: ADMIN_LOGIN, password: ADMIN_PASSWORD });
+    assert.equal(login.ok, false);
+    assert.match(login.error, /EISDIR|state|save|persist/i);
+
+    const checked = await emit(socket, 'admin:check', {});
+    assert.equal(checked.ok, true);
+    assert.equal(checked.isAdmin, false);
+
+    const logs = await emit(socket, 'admin:logs:get', {});
+    assert.equal(logs.ok, false);
+  } finally {
+    socket.close();
+    await server.stop();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('failed room password persistence does not keep an in-memory room token', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mana-room-token-save-fail-'));
+  const server = await startServer({ DATA_DIR: dataDir });
+  const sockets = [];
+  try {
+    const admin = await connect(server.url);
+    const outsider = await connect(server.url);
+    sockets.push(admin, outsider);
+    const adminToken = await adminLogin(admin);
+    const room = await createRoom(admin, adminToken, { password: 'secret' });
+
+    const stateFile = path.join(dataDir, 'state.json');
+    fs.rmSync(stateFile, { force: true });
+    fs.mkdirSync(stateFile);
+
+    const checked = await emit(outsider, 'room:checkPassword', { roomId: room.id, password: 'secret' });
+    assert.equal(checked.ok, false);
+    assert.match(checked.error, /EISDIR|state|save|persist/i);
+
+    const direct = await emit(outsider, 'room:get', { roomId: room.id });
+    assert.equal(direct.ok, false);
+    assert.equal(direct.error, 'ROOM_PASSWORD_REQUIRED');
+  } finally {
+    sockets.forEach((socket) => socket.close());
+    await server.stop();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('failed screenshot persistence rolls back in-memory screenshots', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mana-screenshot-save-fail-'));
+  const server = await startServer({ DATA_DIR: dataDir });
+  const sockets = [];
+  try {
+    const admin = await connect(server.url);
+    const playerA = await connect(server.url);
+    const playerB = await connect(server.url);
+    sockets.push(admin, playerA, playerB);
+    const adminToken = await adminLogin(admin);
+    const room = await createRoom(admin, adminToken);
+
+    assert.equal((await emit(playerA, 'room:join', { roomId: room.id, name: 'A', team: 'A' })).ok, true);
+    assert.equal((await emit(playerB, 'room:join', { roomId: room.id, name: 'B', team: 'B' })).ok, true);
+    assert.equal((await emit(playerA, 'player:toggleReady', { roomId: room.id })).ok, true);
+    assert.equal((await emit(playerB, 'player:toggleReady', { roomId: room.id })).room.stage, 'live');
+
+    const stateFile = path.join(dataDir, 'state.json');
+    fs.rmSync(stateFile, { force: true });
+    fs.mkdirSync(stateFile);
+
+    const uploaded = await emit(playerA, 'match:uploadScreenshot', { roomId: room.id, dataUrl: IMAGE });
+    assert.equal(uploaded.ok, false);
+    assert.match(uploaded.error, /EISDIR|state|save|persist/i);
+
+    const readBack = await emit(admin, 'room:get', { roomId: room.id, adminToken });
+    assert.equal(readBack.ok, true);
+    assert.equal(readBack.room.resultScreenshots.length, 0);
+  } finally {
+    sockets.forEach((socket) => socket.close());
+    await server.stop();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('player session token cannot create a second slot in a protected room', async () => {
+  const server = await startServer();
+  const sockets = [];
+  try {
+    const admin = await connect(server.url);
+    const player = await connect(server.url);
+    const secondSocket = await connect(server.url);
+    sockets.push(admin, player, secondSocket);
+    const adminToken = await adminLogin(admin);
+    const room = await createRoom(admin, adminToken, { password: 'secret', teamSize: 2 });
+    const access = await emit(player, 'room:checkPassword', { roomId: room.id, password: 'secret' });
+    assert.equal(access.ok, true);
+
+    const joined = await emit(player, 'room:join', {
+      roomId: room.id,
+      name: 'Alice',
+      roomAccessToken: access.roomAccessToken
+    });
+    assert.equal(joined.ok, true);
+    assert.match(joined.playerSessionToken, /^[a-f0-9]{64}$/);
+
+    const secondJoin = await emit(secondSocket, 'room:join', {
+      roomId: room.id,
+      name: 'Second',
+      playerSessionToken: joined.playerSessionToken
+    });
+    assert.equal(secondJoin.ok, false);
+    assert.equal(secondJoin.error, 'ROOM_PASSWORD_REQUIRED');
+  } finally {
+    sockets.forEach((socket) => socket.close());
+    await server.stop();
+  }
+});
+
+test('production startup refuses invalid security numeric environment values', async () => {
+  const port = await freePort();
+  const result = await runServerExpectExit(productionEnv(port, { ADMIN_SESSION_TTL_MS: 'not-a-number' }));
+
+  assert.notEqual(result.exitCode, null, 'server kept running with invalid security TTL');
+  assert.notEqual(result.exitCode, 0);
+  assert.match(result.output, /ADMIN_SESSION_TTL_MS|numeric|integer/i);
+});
+
+test('production startup refuses partially numeric security environment values', async () => {
+  const port = await freePort();
+  const result = await runServerExpectExit(productionEnv(port, { ADMIN_LOGIN_WINDOW_MS: '60000ms' }));
+
+  assert.notEqual(result.exitCode, null, 'server kept running with partially numeric security config');
+  assert.notEqual(result.exitCode, 0);
+  assert.match(result.output, /ADMIN_LOGIN_WINDOW_MS|numeric|integer/i);
+});
+
+test('production startup refuses TRUST_PROXY on a public bind host', async () => {
+  const port = await freePort();
+  const result = await runServerExpectExit(productionEnv(port, { HOST: '0.0.0.0', TRUST_PROXY: '1' }));
+
+  assert.notEqual(result.exitCode, null, 'server kept running with spoofable proxy headers');
+  assert.notEqual(result.exitCode, 0);
+  assert.match(result.output, /TRUST_PROXY|HOST|loopback/i);
+});
+
+test('legacy plaintext room passwords are migrated on the next save', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mana-legacy-password-'));
+  const stateFile = path.join(dataDir, 'state.json');
+  fs.writeFileSync(stateFile, JSON.stringify({
+    rooms: [{
+      id: 'legacy-room',
+      teamAName: 'Legacy A',
+      teamBName: 'Legacy B',
+      password: 'old-secret',
+      hasPassword: true,
+      teamSize: 1,
+      maxPlayers: 2,
+      players: [],
+      stage: 'lobby',
+      createdAt: Date.now()
+    }]
+  }, null, 2));
+
+  const server = await startServer({ DATA_DIR: dataDir });
+  const socket = await connect(server.url);
+  try {
+    const checked = await emit(socket, 'room:checkPassword', { roomId: 'legacy-room', password: 'old-secret' });
+    assert.equal(checked.ok, true);
+
+    const persisted = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    const room = persisted.rooms.find((item) => item.id === 'legacy-room');
+    assert.ok(room);
+    assert.equal(room.password, '');
+    assert.match(room.passwordHash, /^[a-f0-9]{64}$/);
+    assert.match(room.passwordSalt, /^[a-f0-9]+$/);
+    assert.equal(JSON.stringify(room).includes('old-secret'), false);
+  } finally {
+    socket.close();
+    await server.stop();
+    fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });
 

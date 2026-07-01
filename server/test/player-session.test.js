@@ -129,3 +129,42 @@ test('player session token restores a lobby slot after socket reconnect', async 
     await server.stop();
   }
 });
+
+test('stale player session tokens do not block public room reads after leaving a slot', async () => {
+  const server = await startServer();
+  const sockets = [];
+  try {
+    const admin = await connect(server.url);
+    sockets.push(admin);
+    const adminToken = await adminLogin(admin);
+    const created = await emit(admin, 'rooms:create', {
+      adminToken,
+      teamAName: 'Alpha',
+      teamBName: 'Bravo',
+      teamSize: 1,
+      club: 'Р®Р—',
+      matchFormat: 'BO1',
+      game: 'dota2'
+    });
+    assert.equal(created.ok, true);
+
+    const player = await connect(server.url);
+    sockets.push(player);
+    const joined = await emit(player, 'room:join', { roomId: created.room.id, name: 'Alice', team: 'A' });
+    assert.equal(joined.ok, true);
+
+    const left = await emit(player, 'player:leaveSlot', { roomId: created.room.id });
+    assert.equal(left.ok, true);
+
+    const staleRead = await emit(player, 'room:get', {
+      roomId: created.room.id,
+      playerSessionToken: joined.playerSessionToken
+    });
+    assert.equal(staleRead.ok, true);
+    assert.equal(staleRead.playerSessionToken, '');
+    assert.equal(staleRead.room.players.some((item) => item.id === joined.playerId), false);
+  } finally {
+    sockets.forEach((socket) => socket.close());
+    await server.stop();
+  }
+});

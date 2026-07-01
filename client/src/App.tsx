@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import FloatingChat from './components/FloatingChat';
 import Hub from './components/Hub';
@@ -8,6 +8,7 @@ import TournamentBracket from './pages/TournamentBracket';
 import PastTournaments from './pages/PastTournaments';
 import TournamentDetail from './pages/TournamentDetail';
 import { socket } from './socket';
+import { emitWithAck, isAdminAuthError } from './socketAck';
 import type { SocketAck } from './types';
 import './App.css';
 
@@ -30,6 +31,11 @@ export default function App() {
   const [nickname, setNickname] = useState(readSavedNickname);
   const [adminToken, setAdminToken] = useState(readAdminToken);
   const [isAdmin, setIsAdmin] = useState(false);
+  const adminTokenRef = useRef(adminToken);
+
+  useEffect(() => {
+    adminTokenRef.current = adminToken;
+  }, [adminToken]);
 
   const saveNickname = (nextNickname: string) => {
     const cleanNickname = nextNickname.trim();
@@ -37,34 +43,69 @@ export default function App() {
     setNickname(cleanNickname);
   };
 
-  const saveAdminToken = (token: string) => {
-    localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
-    setAdminToken(token);
-    setIsAdmin(true);
-  };
-
-  const logoutAdmin = () => {
-    const token = adminToken;
-    socket.emit('admin:logout', { adminToken: token }, () => undefined);
+  const clearAdminState = useCallback(() => {
     localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+    adminTokenRef.current = '';
     setAdminToken('');
     setIsAdmin(false);
-  };
+  }, []);
 
-  useEffect(() => {
-    const token = readAdminToken();
-    if (!token) return;
-    socket.emit('admin:check', { adminToken: token }, (response: SocketAck<AdminCheckPayload>) => {
+  const saveAdminToken = useCallback((token: string) => {
+    localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
+    adminTokenRef.current = token;
+    setAdminToken(token);
+    setIsAdmin(true);
+  }, []);
+
+  const logoutAdmin = useCallback(() => {
+    const token = adminTokenRef.current;
+    void emitWithAck('admin:logout', { adminToken: token });
+    clearAdminState();
+  }, [clearAdminState]);
+
+  const validateAdminToken = useCallback((token: string) => {
+    if (!token) {
+      clearAdminState();
+      return;
+    }
+
+    void emitWithAck<AdminCheckPayload>('admin:check', { adminToken: token }).then((response) => {
+      if (readAdminToken() !== token) return;
+
       if (!response.ok || !response.isAdmin) {
-        localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
-        setAdminToken('');
-        setIsAdmin(false);
+        clearAdminState();
         return;
       }
+
+      adminTokenRef.current = token;
       setAdminToken(token);
       setIsAdmin(true);
     });
-  }, []);
+  }, [clearAdminState]);
+
+  useEffect(() => {
+    validateAdminToken(readAdminToken());
+
+    const refreshAdmin = () => validateAdminToken(readAdminToken());
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === ADMIN_TOKEN_STORAGE_KEY) refreshAdmin();
+    };
+    const onVisibility = () => {
+      if (!document.hidden) refreshAdmin();
+    };
+
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('focus', refreshAdmin);
+    document.addEventListener('visibilitychange', onVisibility);
+    socket.on('connect', refreshAdmin);
+
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('focus', refreshAdmin);
+      document.removeEventListener('visibilitychange', onVisibility);
+      socket.off('connect', refreshAdmin);
+    };
+  }, [validateAdminToken]);
 
   if (!nickname) {
     return <NicknameGate onSave={saveNickname} />;
@@ -79,6 +120,7 @@ export default function App() {
         adminToken={adminToken}
         onAdminLogin={saveAdminToken}
         onAdminLogout={logoutAdmin}
+        onAdminAuthError={clearAdminState}
       />
     </BrowserRouter>
   );
@@ -90,7 +132,8 @@ function AppRoutes({
   isAdmin,
   adminToken,
   onAdminLogin,
-  onAdminLogout
+  onAdminLogout,
+  onAdminAuthError
 }: {
   nickname: string;
   onNicknameChange: (nickname: string) => void;
@@ -98,6 +141,7 @@ function AppRoutes({
   adminToken: string;
   onAdminLogin: (token: string) => void;
   onAdminLogout: () => void;
+  onAdminAuthError: () => void;
 }) {
   const location = useLocation();
   const isRoomPage = location.pathname.includes('/room/');
@@ -105,7 +149,7 @@ function AppRoutes({
   const [maintenance, setMaintenance] = useState(false);
 
   useEffect(() => {
-    socket.emit('maintenance:get', (response: SocketAck<MaintenancePayload>) => {
+    void emitWithAck<MaintenancePayload>('maintenance:get').then((response) => {
       if (response.ok) setMaintenance(response.enabled);
     });
     const onMaintenance = (payload: MaintenancePayload) => setMaintenance(Boolean(payload.enabled));
@@ -132,7 +176,7 @@ function AppRoutes({
         <Route path="/dota/past" element={<DotaDevelopment />} />
         <Route path="/past/:tournamentId" element={<TournamentDetail game="cs2" isAdmin={isAdmin} onAdminLogout={onAdminLogout} />} />
         <Route path="/dota/past/:tournamentId" element={<DotaDevelopment />} />
-        <Route path="/admin" element={<AdminLogin isAdmin={isAdmin} adminToken={adminToken} onAdminLogin={onAdminLogin} onAdminLogout={onAdminLogout} />} />
+        <Route path="/admin" element={<AdminLogin isAdmin={isAdmin} adminToken={adminToken} onAdminLogin={onAdminLogin} onAdminLogout={onAdminLogout} onAdminAuthError={onAdminAuthError} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
@@ -158,7 +202,7 @@ function DotaDevelopment() {
 
 function TechnicalMode() {
   return (
-    <main className="nicknameGate technicalGate">
+    <main className="nicknameGate technicalGate" data-testid="technical-mode">
       <section className="loginCard">
         <ManaLogo />
         <h1>Технический режим</h1>
@@ -186,13 +230,14 @@ function NicknameGate({ onSave }: { onSave: (nickname: string) => void }) {
   };
 
   return (
-    <main className="nicknameGate">
+    <main className="nicknameGate" data-testid="nickname-gate">
       <section className="loginCard">
         <ManaLogo />
         <h1>Введи никнейм</h1>
         <p className="muted upper">Ник сохранится на этом компьютере и будет автоматически использоваться в следующих комнатах.</p>
         <form className="loginForm" onSubmit={submit}>
           <input
+            data-testid="nickname-input"
             autoFocus
             value={value}
             onChange={(event) => {
@@ -203,7 +248,7 @@ function NicknameGate({ onSave }: { onSave: (nickname: string) => void }) {
             maxLength={24}
             required
           />
-          <button type="submit">Войти в хаб</button>
+          <button type="submit" data-testid="nickname-submit">Войти в хаб</button>
         </form>
         {error && <p className="errorText">{error}</p>}
       </section>
@@ -215,12 +260,14 @@ function AdminLogin({
   isAdmin,
   adminToken,
   onAdminLogin,
-  onAdminLogout
+  onAdminLogout,
+  onAdminAuthError
 }: {
   isAdmin: boolean;
   adminToken: string;
   onAdminLogin: (token: string) => void;
   onAdminLogout: () => void;
+  onAdminAuthError: () => void;
 }) {
   const navigate = useNavigate();
   const [login, setLogin] = useState('');
@@ -228,61 +275,75 @@ function AdminLogin({
   const [error, setError] = useState('');
   const [maintenance, setMaintenance] = useState(false);
   const [logs, setLogs] = useState<Array<{ id: string; action: string; actor: string; createdAt: number }>>([]);
+  const [pending, setPending] = useState('');
 
   useEffect(() => {
-    socket.emit('maintenance:get', (response: SocketAck<MaintenancePayload>) => {
+    void emitWithAck<MaintenancePayload>('maintenance:get').then((response) => {
       if (response.ok) setMaintenance(response.enabled);
     });
   }, []);
 
-  const submit = (event: FormEvent) => {
+  const handleAdminError = (message: string) => {
+    setError(message);
+    if (isAdminAuthError(message)) onAdminAuthError();
+  };
+
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError('');
+    if (pending) return;
 
-    socket.emit('admin:login', { login: login.trim(), password }, (response: SocketAck<AdminLoginPayload>) => {
-      if (!response.ok) {
-        setError(response.error);
-        return;
-      }
-      onAdminLogin(response.token);
-      navigate('/admin');
-    });
+    setPending('login');
+    const response = await emitWithAck<AdminLoginPayload>('admin:login', { login: login.trim(), password });
+    setPending('');
+    if (!response.ok) {
+      setError(response.error);
+      return;
+    }
+    onAdminLogin(response.token);
+    navigate('/admin');
   };
 
-  const toggleMaintenance = () => {
-    socket.emit('maintenance:set', { adminToken, enabled: !maintenance }, (response: SocketAck<MaintenancePayload>) => {
-      if (!response.ok) {
-        setError(response.error);
-        return;
-      }
-      setMaintenance(response.enabled);
-    });
+  const toggleMaintenance = async () => {
+    if (pending) return;
+    setPending('maintenance');
+    const response = await emitWithAck<MaintenancePayload>('maintenance:set', { adminToken, enabled: !maintenance });
+    setPending('');
+    if (!response.ok) {
+      handleAdminError(response.error);
+      return;
+    }
+    setMaintenance(response.enabled);
   };
 
-  const loadLogs = () => {
-    socket.emit('admin:logs:get', { adminToken }, (response: SocketAck<{ logs: Array<{ id: string; action: string; actor: string; createdAt: number }> }>) => {
-      if (!response.ok) {
-        setError(response.error);
-        return;
-      }
-      setLogs(response.logs || []);
-    });
+  const loadLogs = async () => {
+    if (pending) return;
+    setPending('logs');
+    const response = await emitWithAck<{ logs: Array<{ id: string; action: string; actor: string; createdAt: number }> }>('admin:logs:get', { adminToken });
+    setPending('');
+    if (!response.ok) {
+      handleAdminError(response.error);
+      return;
+    }
+    setLogs(response.logs || []);
   };
 
-  const exportBackup = () => {
-    socket.emit('admin:backup:get', { adminToken }, (response: SocketAck<{ backup: unknown }>) => {
-      if (!response.ok) {
-        setError(response.error);
-        return;
-      }
-      const blob = new Blob([JSON.stringify(response.backup, null, 2)], { type: 'application/json;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `mana-backup-${Date.now()}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    });
+  const exportBackup = async () => {
+    if (pending) return;
+    setPending('backup');
+    const response = await emitWithAck<{ backup: unknown }>('admin:backup:get', { adminToken });
+    setPending('');
+    if (!response.ok) {
+      handleAdminError(response.error);
+      return;
+    }
+    const blob = new Blob([JSON.stringify(response.backup, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mana-backup-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
 
@@ -294,13 +355,16 @@ function AdminLogin({
       all: 'все чаты'
     };
     if (!window.confirm(`Очистить ${names[scope]}?`)) return;
+    if (pending) return;
     setError('');
-    socket.emit('admin:chat:clear', { adminToken, scope }, (response: SocketAck) => {
+    setPending('clearChats');
+    void emitWithAck('admin:chat:clear', { adminToken, scope }).then((response: SocketAck) => {
+      setPending('');
       if (!response.ok) {
-        setError(response.error);
+        handleAdminError(response.error);
         return;
       }
-      loadLogs();
+      void loadLogs();
     });
   };
 
@@ -312,32 +376,32 @@ function AdminLogin({
         <p className="muted upper">Админ-права проверяются на сервере. Обычные пользователи не могут создавать комнаты и менять результаты.</p>
 
         {isAdmin ? (
-          <div className="adminLoggedBox">
+          <div className="adminLoggedBox" data-testid="admin-panel">
             <b>АДМИН-ПАНЕЛЬ АКТИВНА</b>
             <div className="adminPanelGrid">
               <section className="adminPanelSection">
                 <span>Сайт</span>
-                <button type="button" onClick={toggleMaintenance}>{maintenance ? 'Выключить технический режим' : 'Включить технический режим'}</button>
-                <button type="button" onClick={exportBackup}>Скачать резервную копию</button>
+                <button type="button" data-testid="maintenance-toggle" disabled={Boolean(pending)} onClick={toggleMaintenance}>{maintenance ? 'Выключить технический режим' : 'Включить технический режим'}</button>
+                <button type="button" disabled={Boolean(pending)} onClick={exportBackup}>Скачать резервную копию</button>
               </section>
 
               <section className="adminPanelSection">
                 <span>Чаты</span>
-                <button type="button" className="ghostBtn" onClick={() => clearChats('global')}>Очистить общий чат</button>
-                <button type="button" className="ghostBtn" onClick={() => clearChats('admin')}>Очистить админ-чат</button>
-                <button type="button" className="ghostBtn" onClick={() => clearChats('room')}>Очистить чаты комнат</button>
+                <button type="button" className="ghostBtn" disabled={Boolean(pending)} onClick={() => clearChats('global')}>Очистить общий чат</button>
+                <button type="button" className="ghostBtn" disabled={Boolean(pending)} onClick={() => clearChats('admin')}>Очистить админ-чат</button>
+                <button type="button" className="ghostBtn" disabled={Boolean(pending)} onClick={() => clearChats('room')}>Очистить чаты комнат</button>
               </section>
 
               <section className="adminPanelSection">
                 <span>Переходы</span>
                 <Link className="adminLinkButton" to="/">Перейти на CS2</Link>
                 <button type="button" className="ghostBtn" disabled>Dota 2 в разработке</button>
-                <button type="button" className="ghostBtn" onClick={onAdminLogout}>Выйти из админки</button>
+                <button type="button" className="ghostBtn" data-testid="admin-logout" onClick={onAdminLogout}>Выйти из админки</button>
               </section>
 
               <section className="adminPanelSection adminLogsSection">
                 <span>Логи</span>
-                <button type="button" className="ghostBtn" onClick={loadLogs}>Обновить логи админа</button>
+                <button type="button" className="ghostBtn" disabled={Boolean(pending)} onClick={loadLogs}>Обновить логи админа</button>
                 <div className="adminLogsBox">
                   {logs.length === 0 ? <p>Нажми «Обновить логи админа», чтобы посмотреть действия.</p> : logs.slice(0, 24).map((log) => (
                     <p key={log.id}><strong>{log.action}</strong> · {log.actor} · {new Date(log.createdAt).toLocaleString('ru-RU')}</p>
@@ -347,8 +411,9 @@ function AdminLogin({
             </div>
           </div>
         ) : (
-          <form className="loginForm" onSubmit={submit}>
+          <form className="loginForm" data-testid="admin-login-form" onSubmit={submit}>
             <input
+              data-testid="admin-login-input"
               autoFocus
               value={login}
               onChange={(event) => {
@@ -360,6 +425,7 @@ function AdminLogin({
               required
             />
             <input
+              data-testid="admin-password-input"
               type="password"
               value={password}
               onChange={(event) => {
@@ -370,7 +436,7 @@ function AdminLogin({
               autoComplete="current-password"
               required
             />
-            <button type="submit">Войти как админ</button>
+            <button type="submit" data-testid="admin-login-submit" disabled={Boolean(pending)}>{pending === 'login' ? 'Проверяю...' : 'Войти как админ'}</button>
           </form>
         )}
 

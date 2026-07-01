@@ -1,12 +1,13 @@
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import ManaLogo from './ManaLogo';
 import RoomChat from './RoomChat';
 import SideOperatives from './SideOperatives';
 import Veto from './Veto';
 import { socket } from '../socket';
-import { getRoomAccessToken, setRoomAccessToken } from '../roomAccess';
-import { getPlayerSessionToken, setPlayerSessionToken } from '../playerSession';
+import { emitWithAck, isAdminAuthError } from '../socketAck';
+import { clearRoomAccessToken, getRoomAccessToken, setRoomAccessToken } from '../roomAccess';
+import { clearPlayerSessionToken, getPlayerSessionToken, setPlayerSessionToken } from '../playerSession';
 import type { Player, Room as RoomType, SocketAck, Stage, Team } from '../types';
 import './Room.css';
 
@@ -55,6 +56,19 @@ export default function Room({
   const [copied, setCopied] = useState('');
   const [accessRequired, setAccessRequired] = useState(false);
   const [accessPassword, setAccessPassword] = useState('');
+  const [accessChecking, setAccessChecking] = useState(false);
+  const [pendingAction, setPendingAction] = useState('');
+  const roomIdRef = useRef(roomId || '');
+  const loadRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    roomIdRef.current = roomId || '';
+  }, [roomId]);
+
+  const clearRoomTokens = useCallback((targetRoomId: string) => {
+    clearRoomAccessToken(targetRoomId);
+    clearPlayerSessionToken(targetRoomId);
+  }, []);
 
   useEffect(() => {
     const onConnect = () => setSocketId(socket.id || '');
@@ -68,33 +82,37 @@ export default function Room({
   const loadRoom = useCallback((tokenOverride?: string) => {
     if (!roomId) return;
 
-    socket.emit(
-      'room:get',
-      {
-        roomId,
-        adminToken,
-        roomAccessToken: tokenOverride ?? getRoomAccessToken(roomId),
-        playerSessionToken: getPlayerSessionToken(roomId)
-      },
-      (response: SocketAck<RoomPayload>) => {
-        if (!response.ok) {
-          if (response.error === 'ROOM_PASSWORD_REQUIRED') {
-            setRoom(null);
-            setAccessRequired(true);
-            setError('');
-            return;
-          }
-          setError(response.error);
+    const requestRoomId = roomId;
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
+
+    void emitWithAck<RoomPayload>('room:get', {
+      roomId: requestRoomId,
+      adminToken,
+      roomAccessToken: tokenOverride ?? getRoomAccessToken(requestRoomId),
+      playerSessionToken: getPlayerSessionToken(requestRoomId)
+    }).then((response) => {
+      if (loadRequestIdRef.current !== requestId || roomIdRef.current !== requestRoomId) return;
+
+      if (!response.ok) {
+        if (response.error === 'ROOM_PASSWORD_REQUIRED') {
+          clearRoomTokens(requestRoomId);
+          setRoom(null);
+          setAccessRequired(true);
+          setError('');
           return;
         }
-        if (response.roomAccessToken) setRoomAccessToken(roomId, response.roomAccessToken);
-        if (response.playerSessionToken) setPlayerSessionToken(roomId, response.playerSessionToken);
-        setAccessRequired(false);
-        setAccessPassword('');
-        setRoom(response.room);
+        setError(response.error);
+        return;
       }
-    );
-  }, [adminToken, roomId]);
+      if (response.room.id !== requestRoomId) return;
+      if (response.roomAccessToken) setRoomAccessToken(requestRoomId, response.roomAccessToken);
+      if (response.playerSessionToken) setPlayerSessionToken(requestRoomId, response.playerSessionToken);
+      setAccessRequired(false);
+      setAccessPassword('');
+      setRoom(response.room);
+    });
+  }, [adminToken, clearRoomTokens, roomId]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -129,38 +147,55 @@ export default function Room({
     return room.players.find((player) => player.socketId === socketId) || null;
   }, [room, socketId]);
 
+  const handleRoomError = useCallback((message: string, targetRoomId: string) => {
+    if (message === 'ROOM_PASSWORD_REQUIRED') {
+      clearRoomTokens(targetRoomId);
+      setRoom(null);
+      setAccessRequired(true);
+      setError('');
+      return;
+    }
+
+    setError(message);
+    if (isAdminAuthError(message)) onAdminLogout();
+  }, [clearRoomTokens, onAdminLogout]);
+
   const joinRoom = (event: FormEvent) => {
     event.preventDefault();
-    if (!roomId) return;
+    if (!roomId || pendingAction) return;
     setError('');
 
-    socket.emit(
-      'room:join',
-      {
-        roomId,
-        name: nickname,
-        team: team === 'auto' ? null : team,
-        roomAccessToken: getRoomAccessToken(roomId)
-      },
-      (response: JoinAck) => {
-        if (!response.ok) {
-          setError(response.error);
-          return;
-        }
-        if (response.roomAccessToken) setRoomAccessToken(roomId, response.roomAccessToken);
-        if (response.playerSessionToken) setPlayerSessionToken(roomId, response.playerSessionToken);
-        setRoom(response.room);
+    const requestRoomId = roomId;
+    setPendingAction('join');
+    void emitWithAck<RoomPayload & { playerId: string; playerSessionToken?: string }>('room:join', {
+      roomId: requestRoomId,
+      name: nickname,
+      team: team === 'auto' ? null : team,
+      roomAccessToken: getRoomAccessToken(requestRoomId)
+    }).then((response: JoinAck) => {
+      setPendingAction('');
+      if (roomIdRef.current !== requestRoomId) return;
+      if (!response.ok) {
+        handleRoomError(response.error, requestRoomId);
+        return;
       }
-    );
+      if (response.roomAccessToken) setRoomAccessToken(requestRoomId, response.roomAccessToken);
+      if (response.playerSessionToken) setPlayerSessionToken(requestRoomId, response.playerSessionToken);
+      setRoom(response.room);
+    });
   };
 
   const toggleReady = () => {
-    if (!roomId) return;
+    if (!roomId || pendingAction) return;
     setError('');
 
-    socket.emit('player:toggleReady', { roomId }, (response: SocketAck<RoomPayload>) => {
+    const requestRoomId = roomId;
+    setPendingAction('ready');
+    void emitWithAck<RoomPayload>('player:toggleReady', { roomId: requestRoomId }).then((response) => {
+      setPendingAction('');
+      if (roomIdRef.current !== requestRoomId) return;
       if (!response.ok) {
-        setError(response.error);
+        handleRoomError(response.error, requestRoomId);
         return;
       }
       setRoom(response.room);
@@ -169,12 +204,16 @@ export default function Room({
 
 
   const leaveSlot = () => {
-    if (!roomId) return;
+    if (!roomId || pendingAction) return;
     setError('');
 
-    socket.emit('player:leaveSlot', { roomId }, (response: SocketAck<RoomPayload>) => {
+    const requestRoomId = roomId;
+    setPendingAction('leave');
+    void emitWithAck<RoomPayload>('player:leaveSlot', { roomId: requestRoomId }).then((response) => {
+      setPendingAction('');
+      if (roomIdRef.current !== requestRoomId) return;
       if (!response.ok) {
-        setError(response.error);
+        handleRoomError(response.error, requestRoomId);
         return;
       }
       setRoom(response.room);
@@ -182,12 +221,16 @@ export default function Room({
   };
 
   const transferCaptain = (targetPlayerId: string) => {
-    if (!roomId) return;
+    if (!roomId || pendingAction) return;
     setError('');
 
-    socket.emit('player:transferCaptain', { roomId, targetPlayerId }, (response: SocketAck<RoomPayload>) => {
+    const requestRoomId = roomId;
+    setPendingAction('captain');
+    void emitWithAck<RoomPayload>('player:transferCaptain', { roomId: requestRoomId, targetPlayerId }).then((response) => {
+      setPendingAction('');
+      if (roomIdRef.current !== requestRoomId) return;
       if (!response.ok) {
-        setError(response.error);
+        handleRoomError(response.error, requestRoomId);
         return;
       }
       setRoom(response.room);
@@ -207,16 +250,20 @@ export default function Room({
 
   const submitAccessPassword = (event: FormEvent) => {
     event.preventDefault();
-    if (!roomId) return;
+    if (!roomId || accessChecking) return;
     setError('');
 
-    socket.emit('room:checkPassword', { roomId, password: accessPassword }, (response: RoomPasswordAck) => {
+    const requestRoomId = roomId;
+    setAccessChecking(true);
+    void emitWithAck<{ roomAccessToken?: string }>('room:checkPassword', { roomId: requestRoomId, password: accessPassword }).then((response: RoomPasswordAck) => {
+      setAccessChecking(false);
+      if (roomIdRef.current !== requestRoomId) return;
       if (!response.ok) {
-        setError(response.error);
+        handleRoomError(response.error, requestRoomId);
         return;
       }
       const token = response.roomAccessToken || '';
-      setRoomAccessToken(roomId, token);
+      setRoomAccessToken(requestRoomId, token);
       loadRoom(token);
     });
   };
@@ -225,27 +272,28 @@ export default function Room({
     return (
       <>
         <SideOperatives />
-        <main className="appShell roomPage hasDecor">
+        <main className="appShell roomPage hasDecor" data-testid="room-password-page">
           <header className="topBar roomTopBar">
             <ManaLogo />
-            <Link className="backButton" to="/">в†ђ РќР°Р·Р°Рґ РІ С…Р°Р±</Link>
+            <Link className="backButton" to="/">← Назад в хаб</Link>
           </header>
           <section className="roomPanel joinPanel">
             <div>
-              <span className="panelLabel">РџР°СЂРѕР»СЊ РєРѕРјРЅР°С‚С‹</span>
-              <h2>Р—Р°РєСЂС‹С‚С‹Р№ РјР°С‚С‡</h2>
-              <p className="muted">Р’РІРµРґРё РїР°СЂРѕР»СЊ, С‡С‚РѕР±С‹ РѕС‚РєСЂС‹С‚СЊ РєРѕРјРЅР°С‚Сѓ.</p>
+              <span className="panelLabel">Пароль комнаты</span>
+              <h2>Закрытый матч</h2>
+              <p className="muted">Введи пароль, чтобы открыть комнату.</p>
             </div>
             <form className="joinForm" onSubmit={submitAccessPassword}>
               <input
+                data-testid="direct-room-password-input"
                 autoFocus
                 type="password"
                 value={accessPassword}
                 onChange={(event) => setAccessPassword(event.target.value)}
-                placeholder="РџР°СЂРѕР»СЊ"
+                placeholder="Пароль"
                 required
               />
-              <button type="submit">РћС‚РєСЂС‹С‚СЊ</button>
+              <button type="submit" data-testid="direct-room-password-submit" disabled={accessChecking}>{accessChecking ? 'Проверяю...' : 'Открыть'}</button>
             </form>
           </section>
           {error && <div className="errorBox">{error}</div>}
@@ -275,7 +323,7 @@ export default function Room({
   return (
     <>
       <SideOperatives />
-      <main className="appShell roomPage hasDecor">
+      <main className="appShell roomPage hasDecor" data-testid="room-page">
         <header className="topBar roomTopBar">
           <ManaLogo />
           <nav className="roomNav">
@@ -298,7 +346,7 @@ export default function Room({
 
         <section className="roomHero">
           <div className="eyebrow">{room.game === 'cs2' ? 'MATCH ROOM' : 'DOTA ROOM'} · {stageLabel(room.stage)}</div>
-          <h1>{room.teamAName} <span>VS</span> {room.teamBName}</h1>
+          <h1 data-testid="room-title">{room.teamAName} <span>VS</span> {room.teamBName}</h1>
           <p className="muted upper">
             Игроки {room.players.length}/{room.maxPlayers} · Готовы {readyCount}/{room.maxPlayers}{room.winnerName ? ` · Победитель: ${room.winnerName}` : ''}
           </p>
@@ -331,12 +379,12 @@ export default function Room({
               <p className="muted">Ник берётся с главной страницы и сохраняется в браузере.</p>
             </div>
             <form className="joinForm" onSubmit={joinRoom}>
-              <select value={team} onChange={(event) => setTeam(event.target.value as 'auto' | Team)}>
+              <select data-testid="join-team-select" value={team} onChange={(event) => setTeam(event.target.value as 'auto' | Team)}>
                 <option value="auto">Автоматически</option>
                 <option value="A">{room.teamAName}</option>
                 <option value="B">{room.teamBName}</option>
               </select>
-              <button type="submit">Войти игроком</button>
+              <button type="submit" data-testid="join-room-submit" disabled={Boolean(pendingAction)}>{pendingAction === 'join' ? 'Вхожу...' : 'Войти игроком'}</button>
             </form>
           </section>
         )}
@@ -348,10 +396,10 @@ export default function Room({
               <h2>{teamName(room, currentPlayer.team)} · #{currentPlayer.slot + 1}</h2>
             </div>
             <div className="readyActions">
-              <button type="button" onClick={toggleReady} className={currentPlayer.ready ? 'readyButton' : ''}>
+              <button type="button" data-testid="ready-toggle" onClick={toggleReady} className={currentPlayer.ready ? 'readyButton' : ''} disabled={Boolean(pendingAction)}>
                 {currentPlayer.ready ? 'Готов ✓' : 'Я готов'}
               </button>
-              <button type="button" className="ghostBtn leaveSlotButton" onClick={leaveSlot}>
+              <button type="button" className="ghostBtn leaveSlotButton" onClick={leaveSlot} disabled={Boolean(pendingAction)}>
                 Выйти из комнаты
               </button>
             </div>
@@ -359,8 +407,8 @@ export default function Room({
         )}
 
         <section className="teamsGrid">
-          <TeamColumn room={room} team="A" currentPlayer={currentPlayer} onTransferCaptain={transferCaptain} />
-          <TeamColumn room={room} team="B" currentPlayer={currentPlayer} onTransferCaptain={transferCaptain} />
+          <TeamColumn room={room} team="A" currentPlayer={currentPlayer} onTransferCaptain={transferCaptain} transfersDisabled={Boolean(pendingAction)} />
+          <TeamColumn room={room} team="B" currentPlayer={currentPlayer} onTransferCaptain={transferCaptain} transfersDisabled={Boolean(pendingAction)} />
         </section>
 
         <RoomChat
@@ -369,6 +417,7 @@ export default function Room({
           onError={setError}
           onRoomUpdate={setRoom}
           onAccessRequired={() => {
+            clearRoomTokens(room.id);
             setRoom(null);
             setAccessRequired(true);
           }}
@@ -393,7 +442,7 @@ export default function Room({
         )}
 
         {(room.stage === 'live' || room.stage === 'finished') && (
-          <MatchControl room={room} currentPlayer={currentPlayer} isAdmin={isAdmin} adminToken={adminToken} onError={setError} onRoomUpdate={setRoom} />
+          <MatchControl room={room} currentPlayer={currentPlayer} isAdmin={isAdmin} adminToken={adminToken} onError={setError} onRoomUpdate={setRoom} onAdminAuthError={onAdminLogout} />
         )}
       </main>
     </>
@@ -404,12 +453,14 @@ function TeamColumn({
   room,
   team,
   currentPlayer,
-  onTransferCaptain
+  onTransferCaptain,
+  transfersDisabled
 }: {
   room: RoomType;
   team: Team;
   currentPlayer: Player | null;
   onTransferCaptain: (targetPlayerId: string) => void;
+  transfersDisabled: boolean;
 }) {
   const captain = captainForTeam(room, team);
   const currentPlayerIsCaptain = Boolean(currentPlayer && captain?.id === currentPlayer.id && currentPlayer.team === team);
@@ -424,10 +475,16 @@ function TeamColumn({
         {room.slots[team].map((player, index) => {
           const isCurrentPlayer = currentPlayer?.id === player?.id;
           const isCaptain = captain?.id === player?.id;
-          const canTransferCaptain = Boolean(currentPlayerIsCaptain && player && !isCurrentPlayer && player.team === team);
+          const canTransferCaptain = Boolean(!transfersDisabled && currentPlayerIsCaptain && player && !isCurrentPlayer && player.team === team);
 
           return (
             <div
+              data-testid="player-slot"
+              data-team={team}
+              data-slot={index}
+              data-player-name={player?.name || ''}
+              data-ready={player?.ready ? 'true' : 'false'}
+              data-current-player={isCurrentPlayer ? 'true' : 'false'}
               key={`${team}-${index}`}
               role={canTransferCaptain ? 'button' : undefined}
               tabIndex={canTransferCaptain ? 0 : undefined}
@@ -513,7 +570,8 @@ function MatchControl({
   isAdmin,
   adminToken,
   onError,
-  onRoomUpdate
+  onRoomUpdate,
+  onAdminAuthError
 }: {
   room: RoomType;
   currentPlayer: Player | null;
@@ -521,9 +579,11 @@ function MatchControl({
   adminToken: string;
   onError: (message: string) => void;
   onRoomUpdate: (room: RoomType) => void;
+  onAdminAuthError: () => void;
 }) {
   const [uploading, setUploading] = useState(false);
   const [replaceIndex, setReplaceIndex] = useState<number | null>(null);
+  const [finishingTeam, setFinishingTeam] = useState<Team | ''>('');
   const screenshotLimit = room.matchFormat === 'BO3' ? 3 : 1;
   const screenshots = room.resultScreenshots?.length ? room.resultScreenshots : (room.resultScreenshot ? [room.resultScreenshot] : []);
   const canSubmitScreenshot = isAdmin || Boolean(currentPlayer);
@@ -531,6 +591,7 @@ function MatchControl({
   const canUploadScreenshot = canSubmitScreenshot && screenshots.length < screenshotLimit;
 
   const sendScreenshot = (file: File, index: number | null = null) => {
+    if (uploading) return;
     if (!canSubmitScreenshot) {
       onError('Загружать скриншоты могут только игроки матча и админ.');
       return;
@@ -559,19 +620,19 @@ function MatchControl({
     setUploading(true);
     const reader = new FileReader();
     reader.onload = () => {
-      socket.emit(
+      void emitWithAck<RoomPayload>(
         'match:uploadScreenshot',
-        { roomId: room.id, dataUrl: String(reader.result || ''), replaceIndex: index, adminToken, roomAccessToken: getRoomAccessToken(room.id) },
-        (response: SocketAck<RoomPayload>) => {
+        { roomId: room.id, dataUrl: String(reader.result || ''), replaceIndex: index, adminToken, roomAccessToken: getRoomAccessToken(room.id) }
+      ).then((response) => {
           setUploading(false);
           setReplaceIndex(null);
           if (!response.ok) {
             onError(response.error);
+            if (isAdminAuthError(response.error)) onAdminAuthError();
             return;
           }
           onRoomUpdate(response.room);
-        }
-      );
+        });
     };
     reader.onerror = () => {
       setUploading(false);
@@ -606,10 +667,14 @@ function MatchControl({
   };
 
   const finishMatch = (winnerTeam: Team) => {
+    if (finishingTeam) return;
     onError('');
-    socket.emit('match:finish', { roomId: room.id, winnerTeam, adminToken }, (response: SocketAck<RoomPayload>) => {
+    setFinishingTeam(winnerTeam);
+    void emitWithAck<RoomPayload>('match:finish', { roomId: room.id, winnerTeam, adminToken }).then((response) => {
+      setFinishingTeam('');
       if (!response.ok) {
         onError(response.error);
+        if (isAdminAuthError(response.error)) onAdminAuthError();
         return;
       }
       onRoomUpdate(response.room);
@@ -617,7 +682,7 @@ function MatchControl({
   };
 
   return (
-    <section className="roomPanel matchControlPanel resultOnlyPanel">
+    <section className="roomPanel matchControlPanel resultOnlyPanel" data-testid="match-control">
       <div className="matchScoreBlock">
         <span className="panelLabel">Результаты</span>
         <h2>{screenshots.length}/{screenshotLimit}</h2>
@@ -629,7 +694,7 @@ function MatchControl({
         {canSubmitScreenshot && (canUploadScreenshot || replaceIndex !== null) && (
         <label className={`uploadLabel ${!canUploadScreenshot && replaceIndex === null ? 'uploadLabelDisabled' : ''}`}>
           {uploading ? 'Загружаю...' : replaceIndex !== null ? `Заменить скриншот ${replaceIndex + 1}` : 'Загрузить изображение'}
-          <input type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadScreenshot} />
+          <input data-testid="result-screenshot-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadScreenshot} disabled={uploading} />
         </label>
         )}
         {canSubmitScreenshot ? (
@@ -642,7 +707,7 @@ function MatchControl({
         {screenshots.length > 0 ? (
           <div className="screenshotsGrid">
             {screenshots.map((screenshot, index) => (
-              <figure className="screenshotItem" key={`${screenshot.slice(0, 32)}-${index}`}>
+              <figure className="screenshotItem" data-testid="result-screenshot-item" key={`${screenshot.slice(0, 32)}-${index}`}>
                 <img src={screenshot} alt={`Скриншот результата ${index + 1}`} />
                 <figcaption>
                   Карта {index + 1}
@@ -658,13 +723,13 @@ function MatchControl({
 
       <div className="winnerControls">
         <span className="panelLabel">Победитель</span>
-        {room.winnerName && <h3>{room.winnerName}</h3>}
+        {room.winnerName && <h3 data-testid="winner-name">{room.winnerName}</h3>}
         {isAdmin ? (
           <>
             <p className="muted adminWinnerHint">Победителя теперь выставляет только админ после проверки скриншотов.</p>
             <div className="winnerButtons">
-              <button type="button" onClick={() => finishMatch('A')}>{room.winnerTeam === 'A' ? '✓ ' : ''}{room.teamAName}</button>
-              <button type="button" onClick={() => finishMatch('B')}>{room.winnerTeam === 'B' ? '✓ ' : ''}{room.teamBName}</button>
+              <button type="button" data-testid="finish-team-a" onClick={() => finishMatch('A')} disabled={Boolean(finishingTeam)}>{finishingTeam === 'A' ? '...' : room.winnerTeam === 'A' ? '✓ ' : ''}{room.teamAName}</button>
+              <button type="button" data-testid="finish-team-b" onClick={() => finishMatch('B')} disabled={Boolean(finishingTeam)}>{finishingTeam === 'B' ? '...' : room.winnerTeam === 'B' ? '✓ ' : ''}{room.teamBName}</button>
             </div>
           </>
         ) : (

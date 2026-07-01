@@ -48,6 +48,12 @@ ADMIN_LOGIN=your-private-login
 ADMIN_PASSWORD_SALT=generated-salt
 ADMIN_PASSWORD_HASH=generated-hash
 DATA_DIR=/var/lib/manalan
+TRUST_PROXY=1
+ADMIN_SESSION_TTL_MS=43200000
+ROOM_ACCESS_TTL_MS=43200000
+PLAYER_SESSION_TTL_MS=43200000
+ROOM_PASSWORD_MAX_ATTEMPTS=5
+ROOM_PASSWORD_WINDOW_MS=60000
 BRACKET_FETCH_TIMEOUT_MS=3000
 BRACKET_CACHE_TTL_MS=60000
 ```
@@ -59,6 +65,12 @@ node -e "const { randomBytes, pbkdf2Sync } = require('crypto'); const password =
 ```
 
 `CLIENT_URL=*` нельзя использовать на публичном сервере.
+
+Production notes:
+
+- `NODE_ENV=production` requires `DATA_DIR` or `STATE_FILE`; the server refuses implicit state paths.
+- `STATE_STORE_DISABLED=1` is rejected in production.
+- Set `TRUST_PROXY=1` only when Node.js listens on `127.0.0.1` behind Caddy/Timeweb. This lets admin-login and room-password rate limits use forwarded client IPs instead of the local proxy IP.
 
 ## 4. Собрать frontend
 
@@ -96,7 +108,10 @@ nano /etc/caddy/Caddyfile
 
 ```caddy
 manalan.ru, www.manalan.ru {
-    reverse_proxy 127.0.0.1:3001
+    reverse_proxy 127.0.0.1:3001 {
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+    }
 }
 ```
 
@@ -114,6 +129,8 @@ pm2 status
 curl -I http://127.0.0.1:3001
 curl http://127.0.0.1:3001/api/health
 ```
+
+The health response includes `stateFile`. Confirm it points to `/var/lib/manalan` or your explicit `STATE_FILE`, not to the git checkout.
 
 Открой:
 

@@ -1,15 +1,15 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import ManaLogo from './ManaLogo';
 import SideOperatives from './SideOperatives';
 import { socket } from '../socket';
+import { emitWithAck, isAdminAuthError } from '../socketAck';
 import { getRoomAccessToken, setRoomAccessToken } from '../roomAccess';
 import type { Club, GameType, MatchFormat, RoomSummary, SocketAck } from '../types';
 import './Hub.css';
 
 type RoomsPayload = { rooms: RoomSummary[] };
 type CreateRoomAck = SocketAck<{ room: { id: string }; roomAccessToken?: string }>;
-type RoomPasswordAck = SocketAck<{ roomAccessToken?: string }>;
 type Mode = 1 | 2 | 5;
 
 const CS2_MODES: Array<{ value: Mode; title: string; subtitle: string; button: string }> = [
@@ -24,6 +24,7 @@ const DOTA_MODES: Array<{ value: Mode; title: string; subtitle: string; button: 
 ];
 
 function statusLabel(room: RoomSummary) {
+  if (room.stage === 'locked') return 'ЗАКРЫТО';
   if (room.stage === 'lobby') return 'СБОР ИГРОКОВ';
   if (room.stage === 'veto') return 'MAP VETO';
   if (room.stage === 'live') return 'МАТЧ ИДЁТ';
@@ -62,9 +63,12 @@ export default function Hub({
   const [nicknameDraft, setNicknameDraft] = useState(nickname);
   const [showNicknameEditor, setShowNicknameEditor] = useState(false);
   const [error, setError] = useState('');
+  const [passwordChecking, setPasswordChecking] = useState(false);
+  const [deletingRoomId, setDeletingRoomId] = useState('');
+  const passwordRequestIdRef = useRef(0);
 
   useEffect(() => {
-    socket.emit('rooms:get', (response: SocketAck<RoomsPayload>) => {
+    void emitWithAck<RoomsPayload>('rooms:get').then((response) => {
       if (response.ok) setRooms(response.rooms);
       else setError(response.error);
     });
@@ -119,23 +123,25 @@ export default function Hub({
     navigate(`/room/${room.id}`);
   };
 
-  const submitRoomPassword = (event: FormEvent) => {
+  const submitRoomPassword = async (event: FormEvent) => {
     event.preventDefault();
-    if (!passwordModal) return;
+    if (!passwordModal || passwordChecking) return;
 
-    socket.emit(
-      'room:checkPassword',
-      { roomId: passwordModal.roomId, password: passwordModal.password },
-      (response: RoomPasswordAck) => {
-        if (!response.ok) {
-          setPasswordModal({ ...passwordModal, error: response.error });
-          return;
-        }
+    const requestId = passwordRequestIdRef.current + 1;
+    passwordRequestIdRef.current = requestId;
+    const requestRoomId = passwordModal.roomId;
+    const requestPassword = passwordModal.password;
+    setPasswordChecking(true);
+    const response = await emitWithAck<{ roomAccessToken?: string }>('room:checkPassword', { roomId: requestRoomId, password: requestPassword });
+    if (passwordRequestIdRef.current !== requestId) return;
+    setPasswordChecking(false);
+    if (!response.ok) {
+      setPasswordModal((current) => current?.roomId === requestRoomId ? { ...current, error: response.error } : current);
+      return;
+    }
 
-        setRoomAccessToken(passwordModal.roomId, response.roomAccessToken || '');
-        navigate(`/room/${passwordModal.roomId}`);
-      }
-    );
+    setRoomAccessToken(requestRoomId, response.roomAccessToken || '');
+    navigate(`/room/${requestRoomId}`);
   };
 
 
@@ -145,11 +151,15 @@ export default function Hub({
       : `Закрыть матч ${room.teamAName} vs ${room.teamBName} и освободить сервер?`;
 
     if (!window.confirm(message)) return;
+    if (deletingRoomId) return;
 
     setError('');
-    socket.emit('rooms:delete', { roomId: room.id, adminToken }, (response: SocketAck) => {
+    setDeletingRoomId(room.id);
+    void emitWithAck('rooms:delete', { roomId: room.id, adminToken }).then((response: SocketAck) => {
+      setDeletingRoomId('');
       if (!response.ok) {
         setError(response.error);
+        if (isAdminAuthError(response.error)) onAdminLogout();
       }
     });
   };
@@ -157,7 +167,7 @@ export default function Hub({
   return (
     <>
       <SideOperatives />
-      <main className="appShell hubPage hasDecor">
+      <main className="appShell hubPage hasDecor" data-testid="hub-page">
         <header className="topBar">
           <ManaLogo />
           <div className="topActions">
@@ -218,6 +228,7 @@ export default function Hub({
                 <button
                   type="button"
                   key={mode.value}
+                  data-testid={`mode-${mode.value}`}
                   className={`modeCard ${selectedMode === mode.value ? 'active' : ''}`}
                   onClick={() => setSelectedMode(mode.value)}
                 >
@@ -226,7 +237,7 @@ export default function Hub({
                 </button>
               ))}
             </div>
-            <button type="button" className="createBtn" onClick={() => setCreateModal(selectedMode)}>
+            <button type="button" className="createBtn" data-testid="create-room-button" onClick={() => setCreateModal(selectedMode)}>
               {selectedModeInfo.button}
             </button>
           </section>
@@ -257,6 +268,7 @@ export default function Hub({
               navigate(`/room/${roomId}`);
             }}
             onError={setError}
+            onAdminAuthError={onAdminLogout}
           />
         )}
 
@@ -283,10 +295,11 @@ export default function Hub({
 
         {passwordModal && (
           <div className="modalBackdrop">
-            <div className="modal microModal">
+            <div className="modal microModal" data-testid="room-password-modal">
               <h2>Пароль комнаты</h2>
               <form className="modalForm" onSubmit={submitRoomPassword}>
                 <input
+                  data-testid="room-password-input"
                   autoFocus
                   type="password"
                   value={passwordModal.password}
@@ -294,10 +307,18 @@ export default function Hub({
                   placeholder="Введите пароль"
                   required
                 />
-                {passwordModal.error && <p className="errorText">{passwordModal.error}</p>}
+                {passwordModal.error && <p className="errorText" data-testid="room-password-error">{passwordModal.error}</p>}
                 <div className="modalActions">
-                  <button type="submit">Войти</button>
-                  <button type="button" className="ghostBtn" onClick={() => setPasswordModal(null)}>Отмена</button>
+                  <button type="submit" data-testid="room-password-submit" disabled={passwordChecking}>{passwordChecking ? 'Проверяю...' : 'Войти'}</button>
+                  <button
+                    type="button"
+                    className="ghostBtn"
+                    onClick={() => {
+                      passwordRequestIdRef.current += 1;
+                      setPasswordModal(null);
+                      setPasswordChecking(false);
+                    }}
+                  >Отмена</button>
                 </div>
               </form>
             </div>
@@ -337,7 +358,13 @@ function RoomsBlock({
       ) : (
         <div className="roomsList">
           {rooms.map((room) => (
-            <article className={`roomCard ${room.stage === 'finished' ? 'finishedRoomCard' : ''}`} key={room.id}>
+            <article
+              className={`roomCard ${room.stage === 'finished' ? 'finishedRoomCard' : ''}`}
+              data-testid="room-card"
+              data-room-id={room.id}
+              data-room-stage={room.stage}
+              key={room.id}
+            >
               <div className="roomMain">
                 <div className="roomMeta">
                   <span>{room.club}</span>
@@ -356,7 +383,7 @@ function RoomsBlock({
                 <p className="serverLine">{game === 'cs2' ? `CS2: ${room.gameServerAddress} · GOTV: ${room.gotvAddress}` : 'Dota 2: лобби создаётся админом в клиенте игры'}</p>
               </div>
               <div className="roomCardActions">
-                <button type="button" onClick={() => connectToRoom(room)}>
+                <button type="button" data-testid="room-card-open" onClick={() => connectToRoom(room)}>
                   {room.stage === 'finished' ? 'Смотреть' : 'Подключиться'}
                 </button>
                 {isAdmin && (
@@ -379,7 +406,8 @@ function CreateMatchModal({
   mode,
   onClose,
   onCreated,
-  onError
+  onError,
+  onAdminAuthError
 }: {
   game: GameType;
   adminToken: string;
@@ -387,6 +415,7 @@ function CreateMatchModal({
   onClose: () => void;
   onCreated: (roomId: string, roomAccessToken: string) => void;
   onError: (message: string) => void;
+  onAdminAuthError: () => void;
 }) {
   const [club, setClub] = useState<Club>('ЮЗ');
   const [matchFormat, setMatchFormat] = useState<MatchFormat>('BO1');
@@ -407,34 +436,31 @@ function CreateMatchModal({
     }
 
     setCreating(true);
-    socket.emit(
-      'rooms:create',
-      {
-        teamAName: teamAName.trim(),
-        teamBName: teamBName.trim(),
-        club,
-        password: password.trim(),
-        teamSize: mode,
-        matchFormat,
-        game,
-        adminToken
-      },
-      (response: CreateRoomAck) => {
+    void emitWithAck<{ room: { id: string }; roomAccessToken?: string }>('rooms:create', {
+      teamAName: teamAName.trim(),
+      teamBName: teamBName.trim(),
+      club,
+      password: password.trim(),
+      teamSize: mode,
+      matchFormat,
+      game,
+      adminToken
+    }).then((response: CreateRoomAck) => {
         setCreating(false);
         if (!response.ok) {
           setLocalError(response.error);
           onError(response.error);
+          if (isAdminAuthError(response.error)) onAdminAuthError();
           return;
         }
 
         onCreated(response.room.id, response.roomAccessToken || '');
-      }
-    );
+      });
   };
 
   return (
     <div className="modalBackdrop">
-      <div className="modal createMatchModal">
+      <div className="modal createMatchModal" data-testid="create-room-modal">
         <div className="modalHead">
           <div>
             <span>Новый матч MANA</span>
@@ -464,17 +490,18 @@ function CreateMatchModal({
           <div className="twoFields">
             <label>
               Команда A
-              <input value={teamAName} onChange={(event) => setTeamAName(event.target.value)} maxLength={30} required />
+              <input data-testid="create-team-a-input" value={teamAName} onChange={(event) => setTeamAName(event.target.value)} maxLength={30} required />
             </label>
             <label>
               Команда B
-              <input value={teamBName} onChange={(event) => setTeamBName(event.target.value)} maxLength={30} required />
+              <input data-testid="create-team-b-input" value={teamBName} onChange={(event) => setTeamBName(event.target.value)} maxLength={30} required />
             </label>
           </div>
 
           <label>
             Пароль <small>не обязательно</small>
             <input
+              data-testid="create-room-password-input"
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -486,7 +513,7 @@ function CreateMatchModal({
           {localError && <p className="errorText">{localError}</p>}
 
           <div className="modalActions">
-            <button type="submit" disabled={creating}>{creating ? 'Создаю...' : `Создать ${mode}x${mode}`}</button>
+            <button type="submit" data-testid="create-room-submit" disabled={creating}>{creating ? 'Создаю...' : `Создать ${mode}x${mode}`}</button>
             <button type="button" className="ghostBtn" onClick={onClose}>Отмена</button>
           </div>
         </form>

@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { socket } from '../socket';
+import { emitWithAck } from '../socketAck';
 import { getRoomAccessToken } from '../roomAccess';
-import type { ChatMessage, Room, SocketAck } from '../types';
+import type { ChatMessage, Room } from '../types';
 import './FloatingChat.css';
 import './RoomChat.css';
 
@@ -56,10 +56,10 @@ export default function RoomChat({
     if (!cleanText) return;
 
     onError('');
-    socket.emit(
+    void emitWithAck<RoomPayload>(
       'chat:room:send',
-      { roomId: room.id, nickname, text: cleanText, roomAccessToken: getRoomAccessToken(room.id) },
-      (response: SocketAck<RoomPayload>) => {
+      { roomId: room.id, nickname, text: cleanText, roomAccessToken: getRoomAccessToken(room.id) }
+    ).then((response) => {
         if (!response.ok) {
           if (response.error === 'ROOM_PASSWORD_REQUIRED') {
             onAccessRequired();
@@ -72,8 +72,7 @@ export default function RoomChat({
         onRoomUpdate(response.room);
         setLastSeenCount((response.room.chatMessages || []).length);
         setText('');
-      }
-    );
+      });
   };
 
   return (
@@ -92,7 +91,7 @@ export default function RoomChat({
             {messages.length === 0 ? (
               <p className="chatEmpty">В комнате пока нет сообщений.</p>
             ) : messages.map((message) => (
-              <article className="chatMessage" key={message.id}>
+              <article className="chatMessage" data-testid="room-chat-message" key={message.id}>
                 <div>
                   <b>{message.nickname}</b>
                   <time>{formatMessageTime(message.createdAt)}</time>
@@ -104,17 +103,18 @@ export default function RoomChat({
 
           <form className="chatForm" onSubmit={sendMessage}>
             <input
+              data-testid="room-chat-input"
               value={text}
               onChange={(event) => setText(event.target.value)}
               placeholder="Написать в чат комнаты..."
               maxLength={300}
             />
-            <button type="submit">Отправить</button>
+            <button type="submit" data-testid="room-chat-submit">Отправить</button>
           </form>
         </section>
       )}
 
-      <button type="button" className="floatingChatButton roomFloatingChatButton" onClick={() => setOpen((value) => !value)}>
+      <button type="button" className="floatingChatButton roomFloatingChatButton" data-testid="room-chat-toggle" onClick={() => setOpen((value) => !value)}>
         <span>Чат комнаты</span>
         {unreadCount > 0 && <b>{unreadCount}</b>}
       </button>

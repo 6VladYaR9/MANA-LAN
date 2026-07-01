@@ -12,3 +12,6 @@ uploads/
 backups/
 data/
 server/data/
+.tmp/
+test-results/
+playwright-report/
