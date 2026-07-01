@@ -33,9 +33,11 @@ install_nodejs() {
   log "Installing Node.js 24."
   install -d -m 0755 /etc/apt/keyrings
   curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-    | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+    | gpg --batch --yes --dearmor -o /etc/apt/keyrings/nodesource.gpg
+  chmod 0644 /etc/apt/keyrings/nodesource.gpg
   echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list
+  chmod 0644 /etc/apt/sources.list.d/nodesource.list
   apt-get update
   apt-get install -y nodejs
 }
@@ -49,9 +51,11 @@ install_caddy() {
   log "Installing Caddy."
   apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-    | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  chmod 0644 /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
     > /etc/apt/sources.list.d/caddy-stable.list
+  chmod 0644 /etc/apt/sources.list.d/caddy-stable.list
   apt-get update
   apt-get install -y caddy
 }
@@ -101,12 +105,23 @@ install_templates() {
 
 install_runtime_scripts() {
   local source_dir="${REPO_DIR}/deploy/scripts"
+
+  if [[ ! -f "${source_dir}/deploy-release.sh" || ! -f "${source_dir}/rollback-release.sh" || ! -f "${source_dir}/smoke-check.sh" ]]; then
+    log "Runtime deploy scripts are not present in ${source_dir}; skipping /usr/local/sbin install for now."
+    return 1
+  fi
+
   install -m 0755 -o root -g root "${source_dir}/deploy-release.sh" /usr/local/sbin/manalan-deploy-release
   install -m 0755 -o root -g root "${source_dir}/rollback-release.sh" /usr/local/sbin/manalan-rollback-release
   install -m 0755 -o root -g root "${source_dir}/smoke-check.sh" /usr/local/sbin/manalan-smoke-check
 }
 
 configure_sudoers() {
+  if [[ ! -x /usr/local/sbin/manalan-deploy-release || ! -x /usr/local/sbin/manalan-rollback-release || ! -x /usr/local/sbin/manalan-smoke-check ]]; then
+    log "Runtime deploy wrappers are not installed; skipping sudoers file."
+    return
+  fi
+
   cat > "${SUDOERS_FILE}" <<SUDOERS
 ${DEPLOY_USER} ALL=(root) NOPASSWD: /usr/local/sbin/manalan-deploy-release, /usr/local/sbin/manalan-rollback-release, /usr/local/sbin/manalan-smoke-check
 SUDOERS
@@ -132,7 +147,7 @@ main() {
   create_users
   create_dirs
   install_templates
-  install_runtime_scripts
+  install_runtime_scripts || true
   configure_sudoers
   systemctl daemon-reload
   systemctl enable caddy
