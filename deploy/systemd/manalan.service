@@ -1,0 +1,24 @@
+[Unit]
+Description=MANA LAN production app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=manalan
+Group=manalan
+WorkingDirectory=/opt/manalan/current
+EnvironmentFile=/etc/manalan/manalan.env
+ExecStart=/usr/bin/npm start --prefix /opt/manalan/current/server
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/manalan
+
+[Install]
+WantedBy=multi-user.target
