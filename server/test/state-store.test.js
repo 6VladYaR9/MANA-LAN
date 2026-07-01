@@ -107,7 +107,7 @@ test('rooms survive server restart when DATA_DIR is configured', async () => {
       teamSize: 1,
       club: 'ЮЗ',
       matchFormat: 'BO1',
-      game: 'dota2'
+      game: 'cs2'
     });
     assert.equal(created.ok, true);
 
@@ -455,7 +455,7 @@ test('room manager rejects image data URLs with invalid decoded bytes', () => {
     teamSize: 1,
     club: 'Р®Р—',
     matchFormat: 'BO1',
-    game: 'dota2'
+    game: 'cs2'
   });
   room.stage = 'live';
   const fakePng = `data:image/png;base64,${Buffer.from('not really a png').toString('base64')}`;
@@ -473,7 +473,7 @@ test('room manager rejects image data URLs with only a valid header and garbage 
     teamSize: 1,
     club: 'Р В®Р вЂ”',
     matchFormat: 'BO1',
-    game: 'dota2'
+    game: 'cs2'
   });
   room.stage = 'live';
   const pngHeaderAndGarbage = Buffer.concat([
@@ -483,4 +483,98 @@ test('room manager rejects image data URLs with only a valid header and garbage 
   const fakePng = `data:image/png;base64,${pngHeaderAndGarbage.toString('base64')}`;
 
   assert.throws(() => manager.uploadResultScreenshot(room.id, fakePng), /PNG|JPG|WEBP|image|bytes|structure|decode/i);
+});
+
+test('past tournament delete requires the requested game', () => {
+  const RoomManager = require('../roomManager');
+  const manager = new RoomManager({ pastTournaments: [] });
+  const cs2 = manager.createPastTournament({ game: 'cs2', title: 'Shared Cup' }, 'admin');
+  const dota = {
+    ...cs2,
+    id: cs2.id,
+    game: 'dota2',
+    title: 'Dota Shared Cup'
+  };
+  manager.pastTournaments.push(dota);
+
+  const removed = manager.deletePastTournament(cs2.id, 'admin', 'dota2');
+
+  assert.equal(removed.game, 'dota2');
+  assert.equal(manager.pastTournaments.some((item) => item.id === cs2.id && item.game === 'cs2'), true);
+});
+
+test('past tournament ids are collision resistant when created in the same millisecond', () => {
+  const RoomManager = require('../roomManager');
+  const manager = new RoomManager({ pastTournaments: [] });
+  const originalNow = Date.now;
+  Date.now = () => 1780000000000;
+  try {
+    const first = manager.createPastTournament({ game: 'cs2', title: 'Same Cup' }, 'admin');
+    const second = manager.createPastTournament({ game: 'cs2', title: 'Same Cup' }, 'admin');
+    assert.notEqual(first.id, second.id);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test('past tournament rejects unsafe banner and podium image paths', () => {
+  const RoomManager = require('../roomManager');
+  const manager = new RoomManager({ pastTournaments: [] });
+
+  assert.throws(() => manager.createPastTournament({
+    game: 'cs2',
+    title: 'Unsafe Banner',
+    bannerImage: 'https://evil.test/banner.png'
+  }, 'admin'), /image|asset|path|unsafe/i);
+
+  assert.throws(() => manager.createPastTournament({
+    game: 'cs2',
+    title: 'Unsafe Team',
+    place1Photo: '../secret.png'
+  }, 'admin'), /image|asset|path|unsafe/i);
+});
+
+test('past tournament edit updates only the requested game entry', () => {
+  const RoomManager = require('../roomManager');
+  const manager = new RoomManager({ pastTournaments: [] });
+  const cs2 = manager.createPastTournament({ game: 'cs2', title: 'Shared Cup' }, 'admin');
+  const dota = {
+    ...cs2,
+    id: cs2.id,
+    game: 'dota2',
+    title: 'Dota Shared Cup'
+  };
+  manager.pastTournaments.push(dota);
+
+  const updated = manager.updatePastTournament(cs2.id, {
+    game: 'dota2',
+    title: 'Edited Dota Cup',
+    place1Team: 'DOTA WINNERS'
+  }, 'admin', 'dota2');
+
+  assert.equal(updated.title, 'Edited Dota Cup');
+  assert.equal(updated.podium[0].teamName, 'DOTA WINNERS');
+  assert.equal(manager.pastTournaments.find((item) => item.id === cs2.id && item.game === 'cs2').title, 'Shared Cup');
+});
+
+test('bracket state validation rejects malformed structures and preserves sparse overrides', () => {
+  const RoomManager = require('../roomManager');
+  const manager = new RoomManager();
+
+  assert.throws(() => manager.saveBracketState('cs2', {
+    groups: {}
+  }, 'admin'), /groups\.yuz|object/i);
+
+  assert.throws(() => manager.saveBracketState('cs2', {
+    winners: { qf: ['top'], sf: [null, null], final: null }
+  }, 'admin'), /winners\.qf/i);
+
+  const saved = manager.saveBracketState('cs2', {
+    activeTab: 'playoff',
+    quarterFinalOverrides: [null, null, null, { top: 'TEAM Z' }],
+    winners: { qf: ['top', null, null, null], sf: [null, null], final: null }
+  }, 'admin');
+
+  assert.equal(saved.state.activeTab, 'playoff');
+  assert.equal(saved.state.quarterFinalOverrides[3].top, 'TEAM Z');
 });

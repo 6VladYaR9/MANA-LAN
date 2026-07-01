@@ -20,3 +20,12 @@ test('mobile viewport renders the core player surfaces without blank screens', a
   await expectNoConsoleErrors(errors);
 });
 
+test('past archive does not overflow at 320px width', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await enterNickname(page, 'Narrow Mobile');
+  await page.goto('/past');
+  await expect(page.getByTestId('past-page')).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+

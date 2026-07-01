@@ -5,6 +5,24 @@ const MAP_POOL = ['Dust 2', 'Mirage', 'Inferno', 'Nuke', 'Ancient', 'Anubis', 'V
 const CLUBS = ['ЮЗ', 'Ленина'];
 const MATCH_FORMATS = ['BO1', 'BO3'];
 const GAMES = ['cs2', 'dota2'];
+const ENABLED_GAMES = ['cs2'];
+const TEAM_SIZES = [1, 2, 5];
+const TEAM_NAME_MAX_LENGTH = 30;
+const PLAYER_NAME_MAX_LENGTH = 24;
+const ROOM_PASSWORD_MAX_LENGTH = 64;
+const ARCHIVE_IMAGE_PREFIXES = ['/assets/', '/uploads/', '/images/'];
+const BRACKET_STATE_MAX_BYTES = 500_000;
+const BRACKET_TEXT_MAX_LENGTH = 80;
+const BRACKET_TABS = ['yuz', 'lenina', 'playoff'];
+const DEFAULT_COIN_UNLOCK_DELAY_MS = process.env.NODE_ENV === 'test' ? 0 : 7800;
+const COIN_UNLOCK_DELAY_MS = parseNonNegativeIntegerEnv('COIN_UNLOCK_DELAY_MS', DEFAULT_COIN_UNLOCK_DELAY_MS);
+
+function parseNonNegativeIntegerEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  if (!/^\d+$/.test(String(raw))) throw new Error(`${name} must be a non-negative integer.`);
+  return Number.parseInt(raw, 10);
+}
 
 // Пока IP одинаковый, отличаются игровые порты и GOTV-порты.
 // Когда появятся реальные серверы, меняешь только этот массив.
@@ -43,6 +61,14 @@ function normalizeTeamSize(value) {
   return Math.max(1, Math.min(5, parsed));
 }
 
+function validateTeamSize(value) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  if (!TEAM_SIZES.includes(parsed)) {
+    throw new Error('Unsupported team size. Allowed modes are 1x1, 2x2, and 5x5.');
+  }
+  return parsed;
+}
+
 function normalizeClub(value) {
   return CLUBS.includes(value) ? value : 'ЮЗ';
 }
@@ -64,9 +90,161 @@ function cleanText(value, fallback) {
   return text || fallback;
 }
 
+function boundedText(value, fallback, maxLength, label) {
+  const text = cleanText(value, fallback);
+  if (text.length > maxLength) {
+    throw new Error(`${label} length exceeds ${maxLength} characters.`);
+  }
+  return text;
+}
+
+function assertBoundedText(value, maxLength, label) {
+  if (String(value || '').length > maxLength) {
+    throw new Error(`${label} length exceeds ${maxLength} characters.`);
+  }
+}
+
+function safeArchiveImage(value, fallback, label) {
+  const text = cleanText(value, fallback);
+  if (text.startsWith('data:image/')) {
+    return parseDataImage(text, { maxBytes: 3_000_000, label }).dataUrl;
+  }
+
+  if (!text.startsWith('/')) {
+    throw new Error(`${label} must be a safe local asset path.`);
+  }
+
+  if (text.includes('..') || text.includes('\\') || text.includes('//')) {
+    throw new Error(`${label} contains an unsafe path segment.`);
+  }
+
+  if (!ARCHIVE_IMAGE_PREFIXES.some((prefix) => text.startsWith(prefix))) {
+    throw new Error(`${label} must live under an allowed asset path.`);
+  }
+
+  return text.slice(0, 240);
+}
+
+function assertPlainObject(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+}
+
+function bracketText(value, fallback, label, maxLength = BRACKET_TEXT_MAX_LENGTH) {
+  const text = cleanText(value, fallback);
+  if (text.length > maxLength) throw new Error(`${label} length exceeds ${maxLength} characters.`);
+  return text;
+}
+
+function sanitizeWinnerSide(value, label) {
+  if (value === null || value === undefined || value === '') return null;
+  if (value === 'top' || value === 'bottom') return value;
+  throw new Error(`${label} must be top, bottom, or null.`);
+}
+
+function sanitizeBracketTeam(value, label) {
+  assertPlainObject(value, label);
+  return {
+    id: bracketText(value.id, '', `${label} id`, 32),
+    label: bracketText(value.label, '', `${label} label`, 16),
+    name: bracketText(value.name, '', `${label} name`)
+  };
+}
+
+function sanitizeBracketResults(value, teamIds, label) {
+  assertPlainObject(value, label);
+  const safeResults = {};
+  for (const rowId of teamIds) {
+    const sourceRow = value[rowId] || {};
+    assertPlainObject(sourceRow, `${label}.${rowId}`);
+    safeResults[rowId] = {};
+    for (const colId of teamIds) {
+      if (rowId === colId || sourceRow[colId] === undefined) continue;
+      const score = String(sourceRow[colId] || '').trim();
+      if (!/^[0-9:\-]{0,5}$/.test(score)) {
+        throw new Error(`${label}.${rowId}.${colId} contains an invalid score.`);
+      }
+      safeResults[rowId][colId] = score;
+    }
+  }
+  return safeResults;
+}
+
+function sanitizeBracketGroup(value, label) {
+  assertPlainObject(value, label);
+  if (!Array.isArray(value.teams) || value.teams.length === 0 || value.teams.length > 16) {
+    throw new Error(`${label}.teams must contain 1 to 16 teams.`);
+  }
+  const teams = value.teams.map((team, index) => sanitizeBracketTeam(team, `${label}.teams[${index}]`));
+  const teamIds = teams.map((team) => team.id);
+  if (new Set(teamIds).size !== teamIds.length) throw new Error(`${label}.teams contains duplicate ids.`);
+
+  return {
+    teams,
+    results: sanitizeBracketResults(value.results || {}, teamIds, `${label}.results`)
+  };
+}
+
+function sanitizeQuarterFinalOverrides(value) {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 4) throw new Error('quarterFinalOverrides must contain at most 4 items.');
+  return value.map((item, index) => {
+    if (item === null || item === undefined) return {};
+    assertPlainObject(item, `quarterFinalOverrides[${index}]`);
+    return {
+      top: item.top === undefined ? undefined : bracketText(item.top, '', `quarterFinalOverrides[${index}].top`),
+      bottom: item.bottom === undefined ? undefined : bracketText(item.bottom, '', `quarterFinalOverrides[${index}].bottom`)
+    };
+  });
+}
+
+function sanitizePlayoffState(value) {
+  if (value === undefined) return undefined;
+  assertPlainObject(value, 'winners');
+  if (!Array.isArray(value.qf) || value.qf.length !== 4) throw new Error('winners.qf must contain 4 items.');
+  if (!Array.isArray(value.sf) || value.sf.length !== 2) throw new Error('winners.sf must contain 2 items.');
+  return {
+    qf: value.qf.map((item, index) => sanitizeWinnerSide(item, `winners.qf[${index}]`)),
+    sf: value.sf.map((item, index) => sanitizeWinnerSide(item, `winners.sf[${index}]`)),
+    final: sanitizeWinnerSide(value.final, 'winners.final')
+  };
+}
+
+function sanitizeBracketState(state = {}) {
+  assertPlainObject(state, 'Bracket state');
+  const safeState = {};
+
+  if (state.activeTab !== undefined) {
+    if (!BRACKET_TABS.includes(state.activeTab)) throw new Error('activeTab is invalid.');
+    safeState.activeTab = state.activeTab;
+  }
+
+  if (state.clientMutationId !== undefined) {
+    safeState.clientMutationId = bracketText(state.clientMutationId, '', 'clientMutationId', 120);
+  }
+
+  if (state.groups !== undefined) {
+    assertPlainObject(state.groups, 'groups');
+    safeState.groups = {
+      yuz: sanitizeBracketGroup(state.groups.yuz, 'groups.yuz'),
+      lenina: sanitizeBracketGroup(state.groups.lenina, 'groups.lenina')
+    };
+  }
+
+  const overrides = sanitizeQuarterFinalOverrides(state.quarterFinalOverrides);
+  if (overrides !== undefined) safeState.quarterFinalOverrides = overrides;
+
+  const winners = sanitizePlayoffState(state.winners);
+  if (winners !== undefined) safeState.winners = winners;
+
+  return safeState;
+}
+
 function createPasswordRecord(password) {
   const text = String(password || '').trim();
   if (!text) return {};
+  if (text.length > ROOM_PASSWORD_MAX_LENGTH) throw new Error('Room password length exceeds 64 characters.');
 
   const salt = crypto.randomBytes(16).toString('hex');
   const iterations = 120_000;
@@ -82,6 +260,7 @@ function createPasswordRecord(password) {
 function verifyPasswordRecord(room, password) {
   const text = String(password || '');
   if (!room?.hasPassword) return true;
+  if (text.length > ROOM_PASSWORD_MAX_LENGTH) return false;
 
   if (room.passwordHash && room.passwordSalt) {
     const iterations = Number.isFinite(Number(room.passwordIterations)) ? Number(room.passwordIterations) : 120_000;
@@ -142,16 +321,19 @@ class RoomManager {
   }
 
   restoreStateSnapshot(snapshot = {}) {
-    const restored = new RoomManager(snapshot);
-    this.rooms = restored.rooms;
-    this.allocatedServerIds = restored.allocatedServerIds;
-    this.globalMessages = restored.globalMessages;
-    this.adminMessages = restored.adminMessages;
-    this.adminLogs = restored.adminLogs;
-    this.chatCooldowns = restored.chatCooldowns;
-    this.maintenanceMode = restored.maintenanceMode;
-    this.pastTournaments = restored.pastTournaments;
-    this.bracketStates = restored.bracketStates;
+    const state = snapshot && typeof snapshot === 'object' ? snapshot : {};
+    this.rooms = Array.isArray(state.rooms) ? clonePlain(state.rooms) : [];
+    this.allocatedServerIds = new Set();
+    this.rooms.forEach((room) => {
+      if (room?.assignedServer?.id && !room.serverReleased) this.allocatedServerIds.add(room.assignedServer.id);
+    });
+    this.globalMessages = Array.isArray(state.globalMessages) ? clonePlain(state.globalMessages) : [];
+    this.adminMessages = Array.isArray(state.adminMessages) ? clonePlain(state.adminMessages) : [];
+    this.adminLogs = Array.isArray(state.adminLogs) ? clonePlain(state.adminLogs) : [];
+    this.chatCooldowns = new Map();
+    this.maintenanceMode = Boolean(state.maintenanceMode);
+    this.pastTournaments = Array.isArray(state.pastTournaments) ? clonePlain(state.pastTournaments) : this.createDefaultPastTournaments();
+    this.bracketStates = state.bracketStates && typeof state.bracketStates === 'object' ? clonePlain(state.bracketStates) : {};
   }
 
   hydrateRoom(room) {
@@ -172,7 +354,7 @@ class RoomManager {
       game: normalizeGame(room.game),
       club: normalizeClub(room.club),
       matchFormat,
-      targetMaps: Number.isFinite(Number(room.targetMaps)) ? Number(room.targetMaps) : (matchFormat === 'BO3' ? 3 : 1),
+      targetMaps: matchFormat === 'BO3' ? 3 : 1,
       password: '',
       passwordSalt: migratedPassword.passwordSalt || room.passwordSalt || '',
       passwordHash: migratedPassword.passwordHash || room.passwordHash || '',
@@ -295,8 +477,9 @@ class RoomManager {
 
   saveBracketState(game = 'cs2', state = {}, actor = 'admin') {
     const normalizedGame = normalizeGame(game);
-    const safeState = state && typeof state === 'object' ? clonePlain(state) : {};
-    if (JSON.stringify(safeState).length > 500_000) throw new Error('Bracket state is too large.');
+    const clonedState = state && typeof state === 'object' ? clonePlain(state) : {};
+    if (JSON.stringify(clonedState).length > BRACKET_STATE_MAX_BYTES) throw new Error('Bracket state is too large.');
+    const safeState = sanitizeBracketState(clonedState);
 
     const entry = {
       state: safeState,
@@ -345,17 +528,20 @@ class RoomManager {
   }
 
   createRoom({ teamAName, teamBName, password, teamSize, club, matchFormat, game }) {
-    const normalizedTeamSize = normalizeTeamSize(teamSize);
+    const normalizedTeamSize = validateTeamSize(teamSize);
     const normalizedFormat = normalizeMatchFormat(matchFormat);
     const normalizedClub = normalizeClub(club);
     const normalizedGame = normalizeGame(game);
+    if (!ENABLED_GAMES.includes(normalizedGame)) {
+      throw new Error('Dota 2 backend is disabled while the section is in development.');
+    }
     const assignedServer = normalizedGame === 'cs2' ? this.allocateServer(normalizedClub) : null;
     const passwordRecord = createPasswordRecord(password);
 
     const room = {
       id: crypto.randomUUID(),
-      teamAName: cleanText(teamAName, 'Team A'),
-      teamBName: cleanText(teamBName, 'Team B'),
+      teamAName: boundedText(teamAName, 'Team A', TEAM_NAME_MAX_LENGTH, 'Team A name'),
+      teamBName: boundedText(teamBName, 'Team B', TEAM_NAME_MAX_LENGTH, 'Team B name'),
       game: normalizedGame,
       club: normalizedClub,
       matchFormat: normalizedFormat,
@@ -484,7 +670,8 @@ class RoomManager {
             actions: room.veto.actions,
             history: room.veto.history,
             selectedMap: room.veto.selectedMap,
-            createdAt: room.veto.createdAt
+            createdAt: room.veto.createdAt,
+            coinUnlockAt: room.veto.coinUnlockAt || room.veto.createdAt || 0
           }
         : null
     };
@@ -531,6 +718,7 @@ class RoomManager {
       throw new Error('Матч уже начался. Новые игроки не могут занимать слот, но комнату можно смотреть.');
     }
 
+    assertBoundedText(name, PLAYER_NAME_MAX_LENGTH, 'Player name');
     const cleanName = String(name || '').trim();
     if (!cleanName) throw new Error('Сначала введите ник на главной странице');
 
@@ -654,9 +842,10 @@ class RoomManager {
   maybeStartVeto(room) {
     if (room.stage !== 'lobby') return;
 
-    const fullTeamA = room.players.filter((player) => player.team === 'A').length === room.teamSize;
-    const fullTeamB = room.players.filter((player) => player.team === 'B').length === room.teamSize;
-    const allReady = room.players.length === room.maxPlayers && room.players.every((player) => player.ready);
+    const connectedPlayers = room.players.filter((player) => player.connected);
+    const fullTeamA = connectedPlayers.filter((player) => player.team === 'A').length === room.teamSize;
+    const fullTeamB = connectedPlayers.filter((player) => player.team === 'B').length === room.teamSize;
+    const allReady = connectedPlayers.length === room.maxPlayers && connectedPlayers.every((player) => player.ready);
 
     if (fullTeamA && fullTeamB && allReady) {
       if ((room.game || 'cs2') === 'dota2') {
@@ -686,7 +875,8 @@ class RoomManager {
       currentTurnIndex: 0,
       history: [],
       selectedMap: null,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      coinUnlockAt: Date.now() + COIN_UNLOCK_DELAY_MS
     };
   }
 
@@ -703,11 +893,11 @@ class RoomManager {
 
   ensureCaptain(room, team) {
     room.captains ||= { A: null, B: null };
-    const existingCaptain = room.players.find((player) => player.team === team && player.id === room.captains[team]);
+    const existingCaptain = room.players.find((player) => player.team === team && player.id === room.captains[team] && player.connected);
     if (existingCaptain) return existingCaptain;
 
     const nextCaptain = room.players
-      .filter((player) => player.team === team)
+      .filter((player) => player.team === team && player.connected)
       .sort((a, b) => a.slot - b.slot || a.joinedAt - b.joinedAt)[0] || null;
 
     room.captains[team] = nextCaptain?.id || null;
@@ -722,6 +912,9 @@ class RoomManager {
     const room = this.getRoom(roomId);
     if (!room) throw new Error('Комната не найдена');
     if (room.stage !== 'veto' || !room.veto) throw new Error('Veto сейчас не активно');
+    if (Date.now() < Number(room.veto.coinUnlockAt || 0)) {
+      throw new Error('Coin flip is still resolving. Wait for the veto unlock.');
+    }
 
     const currentAction = this.getCurrentAction(room);
     if (!currentAction) throw new Error('Нет активного хода');
@@ -753,7 +946,11 @@ class RoomManager {
         map: map.name,
         pickedBy: currentAction.team,
         pickedByName: captain.name,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        sideChoiceTeam: otherTeam(currentAction.team),
+        side: null,
+        sideChosenByPlayerId: null,
+        sideChosenByName: ''
       });
     }
 
@@ -793,11 +990,50 @@ class RoomManager {
       map: finalMap.name,
       pickedBy: null,
       pickedByName: isBo3Decider ? 'Decider' : 'Auto final',
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      sideChoiceTeam: room.veto.startingTeam,
+      side: null,
+      sideChosenByPlayerId: null,
+      sideChosenByName: ''
     });
 
-    // После MAP VETO матч переходит в live-стадию, а не закрывается.
-    room.stage = 'live';
+    room.stage = this.hasPendingSideChoices(room) ? 'side_choice' : 'live';
+  }
+
+  hasPendingSideChoices(room) {
+    return room.selectedMaps.some((item) => !item.side);
+  }
+
+  chooseSide(roomId, { socketId, round, side }) {
+    const room = this.getRoom(roomId);
+    if (!room) throw new Error('Комната не найдена');
+    if (room.stage !== 'side_choice') throw new Error('Side choice is not active.');
+
+    const normalizedSide = String(side || '').toUpperCase();
+    if (!['CT', 'T'].includes(normalizedSide)) throw new Error('Choose CT or T side.');
+
+    const requestedRound = Number.parseInt(String(round || ''), 10);
+    const selectedMap = Number.isFinite(requestedRound)
+      ? room.selectedMaps.find((item) => Number(item.round) === requestedRound)
+      : room.selectedMaps.find((item) => !item.side);
+    if (!selectedMap) throw new Error('Map for side choice was not found.');
+    if (selectedMap.side) throw new Error('Side already selected for this map.');
+
+    const captain = this.getTeamCaptain(room, selectedMap.sideChoiceTeam);
+    if (!captain || captain.socketId !== socketId) {
+      throw new Error('Only the captain of the side-picking team can choose CT/T.');
+    }
+
+    selectedMap.side = normalizedSide;
+    selectedMap.sideChosenByPlayerId = captain.id;
+    selectedMap.sideChosenByName = captain.name;
+    selectedMap.sideChosenAt = Date.now();
+
+    if (!this.hasPendingSideChoices(room)) {
+      room.stage = 'live';
+    }
+
+    return room;
   }
 
 
@@ -861,6 +1097,18 @@ class RoomManager {
 
     const normalizedWinner = winnerTeam === 'A' || winnerTeam === 'B' ? winnerTeam : null;
     if (!normalizedWinner) throw new Error('Выбери победителя: Team A или Team B');
+    if (room.stage === 'finished') {
+      if (room.winnerTeam === normalizedWinner) return room;
+      throw new Error('Match is already finished.');
+    }
+
+    const screenshots = Array.isArray(room.resultScreenshots)
+      ? room.resultScreenshots
+      : (room.resultScreenshot ? [room.resultScreenshot] : []);
+    const requiredScreenshots = room.matchFormat === 'BO3' ? 3 : 1;
+    if (screenshots.length < requiredScreenshots) {
+      throw new Error(`At least ${requiredScreenshots} result screenshot${requiredScreenshots === 1 ? '' : 's'} required before finishing the match.`);
+    }
 
     room.winnerTeam = normalizedWinner;
     room.winnerName = normalizedWinner === 'A' ? room.teamAName : room.teamBName;
@@ -1019,35 +1267,75 @@ class RoomManager {
     return this.pastTournaments.find((item) => item.id === id) || null;
   }
 
+  normalizePastTournamentFields(data = {}, fallback = {}) {
+    const game = normalizeGame(data.game || fallback.game);
+    const podiumFallback = Array.isArray(fallback.podium) ? fallback.podium : [];
+    const fallbackPlace = (place) => podiumFallback.find((item) => item.place === place) || {};
+
+    return {
+      game,
+      title: cleanText(data.title ?? fallback.title, game === 'dota2' ? 'MANA DOTA 2 CUP' : 'MANA CS2 CUP').slice(0, 60),
+      date: cleanText(data.date ?? fallback.date, String(new Date().getFullYear())).slice(0, 24),
+      bannerImage: safeArchiveImage(
+        data.bannerImage ?? fallback.bannerImage,
+        game === 'dota2' ? '/assets/dota/dota-tournament.svg' : '/assets/tournaments/mana-cup-banner.svg',
+        'Tournament banner image'
+      ),
+      description: cleanText(data.description ?? fallback.description, 'Описание турнира можно изменить в админке.').slice(0, 240),
+      podium: [1, 2, 3].map((place) => {
+        const current = fallbackPlace(place);
+        const defaultPhoto = game === 'dota2'
+          ? `/assets/dota/dota-team-${place === 1 ? 'first' : place === 2 ? 'second' : 'third'}.svg`
+          : `/assets/teams/team-${place === 1 ? 'first' : place === 2 ? 'second' : 'third'}.svg`;
+        const players = data[`place${place}Players`] ?? (Array.isArray(current.players) ? current.players.join(', ') : undefined);
+
+        return {
+          place,
+          teamName: cleanText(data[`place${place}Team`] ?? current.teamName, `TEAM ${place}`).slice(0, 40),
+          teamPhoto: safeArchiveImage(data[`place${place}Photo`] ?? current.teamPhoto, defaultPhoto, `Place ${place} team photo`),
+          players: cleanText(players, 'Player 1, Player 2, Player 3, Player 4, Player 5')
+            .split(/[,\n]/)
+            .map((name) => this.sanitizeChatText(name, 28))
+            .filter(Boolean)
+            .slice(0, 8)
+        };
+      })
+    };
+  }
+
   createPastTournament(data = {}, actor = 'admin') {
-    const game = normalizeGame(data.game);
-    const title = cleanText(data.title, game === 'dota2' ? 'MANA DOTA 2 CUP' : 'MANA CS2 CUP').slice(0, 60);
+    const fields = this.normalizePastTournamentFields(data);
+    const game = fields.game;
+    const title = fields.title;
     const idBase = title.toLowerCase().replace(/[^a-z0-9а-яё]+/gi, '-').replace(/^-|-$/g, '').slice(0, 48) || 'mana-tournament';
     const item = {
-      id: `${idBase}-${Date.now()}`,
-      game,
-      title,
-      date: cleanText(data.date, String(new Date().getFullYear())).slice(0, 24),
-      bannerImage: cleanText(data.bannerImage, game === 'dota2' ? '/assets/dota/dota-tournament.svg' : '/assets/tournaments/mana-cup-banner.svg'),
-      description: cleanText(data.description, 'Описание турнира можно изменить в админке.').slice(0, 240),
-      podium: [1, 2, 3].map((place) => ({
-        place,
-        teamName: cleanText(data[`place${place}Team`], `TEAM ${place}`).slice(0, 40),
-        teamPhoto: cleanText(data[`place${place}Photo`], game === 'dota2' ? `/assets/dota/dota-team-${place === 1 ? 'first' : place === 2 ? 'second' : 'third'}.svg` : `/assets/teams/team-${place === 1 ? 'first' : place === 2 ? 'second' : 'third'}.svg`),
-        players: cleanText(data[`place${place}Players`], 'Player 1, Player 2, Player 3, Player 4, Player 5')
-          .split(/[,\n]/)
-          .map((name) => this.sanitizeChatText(name, 28))
-          .filter(Boolean)
-          .slice(0, 8)
-      }))
+      id: `${idBase}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
+      ...fields
     };
     this.pastTournaments.unshift(item);
     this.addAdminLog('past:create', { id: item.id, title: item.title, game }, actor);
     return item;
   }
 
-  deletePastTournament(id, actor = 'admin') {
-    const index = this.pastTournaments.findIndex((item) => item.id === id);
+  updatePastTournament(id, data = {}, actor = 'admin', game = null) {
+    const normalizedGame = game ? normalizeGame(game) : null;
+    const index = this.pastTournaments.findIndex((item) => item.id === id && (!normalizedGame || (item.game || 'cs2') === normalizedGame));
+    if (index === -1) throw new Error('Турнир не найден');
+
+    const existing = this.pastTournaments[index];
+    const updated = {
+      ...existing,
+      ...this.normalizePastTournamentFields({ ...data, game: data.game || existing.game }, existing),
+      id: existing.id
+    };
+    this.pastTournaments[index] = updated;
+    this.addAdminLog('past:edit', { id: updated.id, title: updated.title, game: updated.game }, actor);
+    return updated;
+  }
+
+  deletePastTournament(id, actor = 'admin', game = null) {
+    const normalizedGame = game ? normalizeGame(game) : null;
+    const index = this.pastTournaments.findIndex((item) => item.id === id && (!normalizedGame || (item.game || 'cs2') === normalizedGame));
     if (index === -1) throw new Error('Турнир не найден');
     const [removed] = this.pastTournaments.splice(index, 1);
     this.addAdminLog('past:delete', { id: removed.id, title: removed.title, game: removed.game }, actor);
@@ -1072,6 +1360,7 @@ class RoomManager {
       const affectedTeam = room.players[playerIndex].team;
 
       room.players[playerIndex].connected = false;
+      room.players[playerIndex].ready = false;
 
       this.ensureCaptain(room, affectedTeam);
       updatedRoomIds.push(room.id);

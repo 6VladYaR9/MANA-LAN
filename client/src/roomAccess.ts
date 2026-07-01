@@ -7,7 +7,12 @@ export function getRoomAccessToken(roomId: string) {
 }
 
 export function setRoomAccessToken(roomId: string, token: string) {
-  if (token) sessionStorage.setItem(roomAccessKey(roomId), token);
+  if (token) {
+    sessionStorage.setItem(roomAccessKey(roomId), token);
+    return;
+  }
+
+  clearRoomAccessToken(roomId);
 }
 
 export function clearRoomAccessToken(roomId: string) {

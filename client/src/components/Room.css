@@ -247,7 +247,16 @@
 }
 
 .uploadLabel input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.uploadLabel:focus-within {
+  outline: 2px solid var(--mana-yellow);
+  outline-offset: 2px;
 }
 
 .uploadLabelDisabled {
@@ -409,6 +418,12 @@
 
 .resultOnlyPanel {
   grid-template-columns: 190px minmax(420px, 1fr) 260px;
+}
+
+@media (max-width: 920px) {
+  .resultOnlyPanel {
+    grid-template-columns: 1fr;
+  }
 }
 
 .screenshotBoxWide {

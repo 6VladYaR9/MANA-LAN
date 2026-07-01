@@ -7,7 +7,12 @@ export function getPlayerSessionToken(roomId: string) {
 }
 
 export function setPlayerSessionToken(roomId: string, token: string) {
-  if (token) sessionStorage.setItem(playerSessionKey(roomId), token);
+  if (token) {
+    sessionStorage.setItem(playerSessionKey(roomId), token);
+    return;
+  }
+
+  clearPlayerSessionToken(roomId);
 }
 
 export function clearPlayerSessionToken(roomId: string) {

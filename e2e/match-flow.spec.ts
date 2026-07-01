@@ -54,6 +54,10 @@ test('protected match can be created, joined, played through veto, screenshotted
 
   await page.getByTestId('finish-team-a').click();
   await expect(page.getByTestId('winner-name')).toContainText(teamA);
+  await page.setViewportSize({ width: 393, height: 851 });
+  await expect(page.getByTestId('match-control')).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
 
   await guestContext.close();
   await expectNoConsoleErrors(adminErrors);

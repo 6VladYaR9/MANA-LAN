@@ -7,6 +7,9 @@
     "install:all": "npm install && npm install --prefix server && npm install --prefix client",
     "ci:install": "npm ci && npm ci --prefix server && npm ci --prefix client",
     "build": "npm run build --prefix client",
+    "test:server": "npm test --prefix server",
+    "test:client": "npm run test:unit --prefix client",
+    "test:unit": "npm run test:server && npm run test:client",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium",
     "test:e2e:headed": "playwright test --headed",
@@ -14,7 +17,7 @@
     "changeset": "changeset",
     "version:packages": "changeset version && npm install --package-lock-only",
     "version:check": "node scripts/require-patch-changeset.mjs",
-    "verify": "npm test --prefix server && npm run build && npm run test:e2e",
+    "verify": "npm run test:unit && npm run build && npm run test:e2e",
     "start": "npm start --prefix server",
     "prod": "npm run build && npm start"
   },

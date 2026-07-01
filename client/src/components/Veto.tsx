@@ -12,15 +12,16 @@ type Props = {
 };
 
 type RoomPayload = { room: Room };
+type Side = 'CT' | 'T';
 
 const MAP_IMAGES: Record<string, string> = {
-  'Dust 2': 'https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/main/images/thumbs/de_dust2_1_png.png',
-  Mirage: 'https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/main/images/thumbs/de_mirage_1_png.png',
-  Inferno: 'https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/main/images/thumbs/de_inferno_1_png.png',
-  Nuke: 'https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/main/images/thumbs/de_nuke_1_png.png',
-  Ancient: 'https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/main/images/thumbs/de_ancient_1_png.png',
-  Anubis: 'https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/main/images/thumbs/de_anubis_1_png.png',
-  Vertigo: 'https://raw.githubusercontent.com/MurkyYT/cs2-map-icons/main/images/thumbs/de_vertigo_1_png.png'
+  'Dust 2': '/assets/maps/dust2.svg',
+  Mirage: '/assets/maps/mirage.svg',
+  Inferno: '/assets/maps/inferno.svg',
+  Nuke: '/assets/maps/nuke.svg',
+  Ancient: '/assets/maps/ancient.svg',
+  Anubis: '/assets/maps/anubis.svg',
+  Vertigo: '/assets/maps/vertigo.svg'
 };
 
 function teamName(room: Room, team: Team | null) {
@@ -68,6 +69,7 @@ function formatRule(room: Room) {
 export default function Veto({ room, currentPlayer, onError, onRoomUpdate }: Props) {
   const veto = room.veto;
   const [showCoin, setShowCoin] = useState(false);
+  const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     if (!veto || room.stage !== 'veto' || veto.history.length > 0) {
@@ -75,15 +77,28 @@ export default function Veto({ room, currentPlayer, onError, onRoomUpdate }: Pro
       return;
     }
 
-    setShowCoin(true);
-    const timer = window.setTimeout(() => setShowCoin(false), 7800);
+    const unlockAt = veto.coinUnlockAt || veto.createdAt || 0;
+    const remaining = Math.max(0, unlockAt - Date.now());
+    setShowCoin(remaining > 0);
+    if (!remaining) return;
+    const timer = window.setTimeout(() => {
+      setNow(Date.now());
+      setShowCoin(false);
+    }, remaining);
     return () => window.clearTimeout(timer);
-  }, [room.stage, veto?.createdAt, veto?.history.length]);
+  }, [room.stage, veto?.createdAt, veto?.coinUnlockAt, veto?.history.length]);
+
+  useEffect(() => {
+    if (!veto?.coinUnlockAt || Date.now() >= veto.coinUnlockAt) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [veto?.coinUnlockAt]);
 
   const currentAction = veto?.currentAction || null;
   const captain = currentAction ? captainForTeam(room, currentAction.team) : null;
+  const coinLocked = Boolean(room.stage === 'veto' && veto?.coinUnlockAt && now < veto.coinUnlockAt);
   const canAct = Boolean(
-    room.stage === 'veto' && !showCoin && currentAction && currentPlayer && captain && currentPlayer.id === captain.id
+    room.stage === 'veto' && !coinLocked && !showCoin && currentAction && currentPlayer && captain && currentPlayer.id === captain.id
   );
 
   const progress = useMemo(() => {
@@ -94,11 +109,28 @@ export default function Veto({ room, currentPlayer, onError, onRoomUpdate }: Pro
 
   if (!veto) return null;
 
+  const pendingSideMap = room.stage === 'side_choice' ? room.selectedMaps.find((item) => !item.side) : null;
+  const sideCaptain = pendingSideMap?.sideChoiceTeam ? captainForTeam(room, pendingSideMap.sideChoiceTeam) : null;
+  const canChooseSide = Boolean(pendingSideMap && currentPlayer && sideCaptain && currentPlayer.id === sideCaptain.id);
+
   const selectMap = (mapName: string) => {
     if (!canAct) return;
     onError('');
 
     void emitWithAck<RoomPayload>('veto:selectMap', { roomId: room.id, mapName }).then((response) => {
+      if (!response.ok) {
+        onError(response.error);
+        return;
+      }
+      onRoomUpdate(response.room);
+    });
+  };
+
+  const chooseSide = (side: Side) => {
+    if (!pendingSideMap || !canChooseSide) return;
+    onError('');
+
+    void emitWithAck<RoomPayload>('veto:chooseSide', { roomId: room.id, round: pendingSideMap.round, side }).then((response) => {
       if (!response.ok) {
         onError(response.error);
         return;
@@ -152,7 +184,18 @@ export default function Veto({ room, currentPlayer, onError, onRoomUpdate }: Pro
             <b className={currentAction.type === 'pick' ? 'pickWord' : 'banWord'}>{currentAction.type === 'ban' ? 'BAN' : 'PICK'}</b>
           </p>
           <p>Капитан: <b>{captain?.name || 'не найден'}</b></p>
-          {!canAct && <p className="muted">Кнопки активны только у капитана текущей команды. Во время монетки выбор заблокирован.</p>}
+          {!canAct && <p className="muted">{coinLocked ? 'Дождись окончания монетки: сервер откроет первый ход автоматически.' : 'Кнопки активны только у капитана текущей команды.'}</p>}
+        </div>
+      ) : room.stage === 'side_choice' && pendingSideMap ? (
+        <div className="turnBox sideChoiceBox" data-testid="side-choice-panel">
+          <p>Карта #{pendingSideMap.round}: <b>{pendingSideMap.map}</b></p>
+          <p>Сторону выбирает: <b>{teamName(room, pendingSideMap.sideChoiceTeam || null)}</b></p>
+          <p>Капитан: <b>{sideCaptain?.name || 'не найден'}</b></p>
+          <div className="sideChoiceActions">
+            <button type="button" data-testid="choose-side-ct" disabled={!canChooseSide} onClick={() => chooseSide('CT')}>CT</button>
+            <button type="button" data-testid="choose-side-t" disabled={!canChooseSide} onClick={() => chooseSide('T')}>T</button>
+          </div>
+          {!canChooseSide && <p className="muted">Кнопки активны только у капитана команды, которая выбирает сторону.</p>}
         </div>
       ) : null}
 

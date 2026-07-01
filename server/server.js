@@ -30,6 +30,8 @@ const ADMIN_SESSION_TTL_MS = parsePositiveIntegerEnv('ADMIN_SESSION_TTL_MS', 100
 const ROOM_ACCESS_TTL_MS = parsePositiveIntegerEnv('ROOM_ACCESS_TTL_MS', 1000 * 60 * 60 * 12);
 const PLAYER_SESSION_TTL_MS = parsePositiveIntegerEnv('PLAYER_SESSION_TTL_MS', 1000 * 60 * 60 * 12);
 const ADMIN_ROOM = 'admins';
+const ADMIN_LOGIN_MAX_LENGTH = 80;
+const ADMIN_PASSWORD_MAX_LENGTH = 256;
 const ADMIN_LOGIN_MAX_ATTEMPTS = parsePositiveIntegerEnv('ADMIN_LOGIN_MAX_ATTEMPTS', 5);
 const ADMIN_LOGIN_WINDOW_MS = parsePositiveIntegerEnv('ADMIN_LOGIN_WINDOW_MS', 60000, 1000);
 const ROOM_PASSWORD_MAX_ATTEMPTS = parsePositiveIntegerEnv('ROOM_PASSWORD_MAX_ATTEMPTS', 5);
@@ -72,6 +74,24 @@ const roomPasswordFailures = new Map();
 if (TRUST_PROXY) app.set('trust proxy', true);
 app.use(cors({ origin: CLIENT_ORIGINS }));
 app.use(express.json({ limit: '6mb' }));
+app.use((req, res, next) => {
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "connect-src 'self' http: https: ws: wss:",
+    "font-src 'self' data:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'"
+  ].join('; '));
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
 
 const clientDistPath = process.env.CLIENT_DIST_PATH || path.join(__dirname, '..', 'client', 'dist');
 const clientIndexPath = path.join(clientDistPath, 'index.html');
@@ -116,8 +136,25 @@ const io = new Server(server, {
     origin: CLIENT_ORIGINS,
     methods: ['GET', 'POST']
   },
+  allowRequest: (req, callback) => {
+    const origin = req.headers.origin;
+    if (isOriginAllowed(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback('Origin is not allowed', false);
+  },
   maxHttpBufferSize: 6e6
 });
+
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  if (CLIENT_ORIGINS === '*') {
+    if (process.env.NODE_ENV === 'production') return false;
+    return true;
+  }
+  return CLIENT_ORIGINS.includes(origin);
+}
 
 function restoreExpiringMap(entries) {
   const map = new Map();
@@ -266,6 +303,20 @@ function ackOk(callback, payload = {}) {
 function ackError(callback, error) {
   const message = error instanceof Error ? error.message : String(error);
   if (typeof callback === 'function') callback({ ok: false, error: message });
+}
+
+function assertAdminCredentialsAllowed(payload = {}) {
+  const login = String(payload?.login || '');
+  const password = String(payload?.password || '');
+  if (login.length > ADMIN_LOGIN_MAX_LENGTH || password.length > ADMIN_PASSWORD_MAX_LENGTH) {
+    throw new Error('Admin credential length exceeds the allowed limit.');
+  }
+}
+
+function assertSiteOpen(socket, payload = {}) {
+  if (!roomManager.getMaintenanceMode()) return;
+  if (isAdmin(socket, payload)) return;
+  throw new Error('Site is in maintenance mode.');
 }
 
 function clientIp(socket) {
@@ -464,6 +515,11 @@ function revokeRoomAccessTokens(roomId) {
 
 function grantPlayerSession(socket, room, player) {
   if (!room || !player) return '';
+  const existing = findPlayerSessionToken(room.id, player.id);
+  if (existing) {
+    rememberPlayerSession(socket, room.id, existing);
+    return existing;
+  }
   const token = createToken();
   playerSessions.set(token, {
     roomId: room.id,
@@ -473,6 +529,19 @@ function grantPlayerSession(socket, room, player) {
   });
   rememberPlayerSession(socket, room.id, token);
   return token;
+}
+
+function findPlayerSessionToken(roomId, playerId) {
+  for (const [token, session] of playerSessions.entries()) {
+    if (session?.roomId !== roomId || session?.playerId !== playerId) continue;
+    if (Number(session.expiresAt) <= Date.now()) {
+      playerSessions.delete(token);
+      continue;
+    }
+    session.expiresAt = Date.now() + PLAYER_SESSION_TTL_MS;
+    return token;
+  }
+  return '';
 }
 
 function resumePlayerSession(socket, room, payload = {}) {
@@ -572,6 +641,7 @@ io.on('connection', (socket) => {
 
   socket.on('admin:login', (payload, callback) => {
     try {
+      assertAdminCredentialsAllowed(payload);
       assertAdminLoginAllowed(socket, payload);
       const adminVerified = verifyAdmin(payload?.login, payload?.password);
       if (!adminVerified) recordAdminLoginFailure(socket, payload);
@@ -708,7 +778,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('rooms:get', (callback) => {
-    ackOk(callback, publicRoomsPayload());
+    try {
+      assertSiteOpen(socket, {});
+      ackOk(callback, publicRoomsPayload());
+    } catch (error) {
+      ackError(callback, error);
+    }
   });
 
   socket.on('rooms:create', (payload, callback) => {
@@ -718,7 +793,7 @@ io.on('connection', (socket) => {
         const room = roomManager.createRoom(payload || {});
         roomManager.addAdminLog('room:create', { roomId: room.id, game: room.game, title: `${room.teamAName} vs ${room.teamBName}` }, actor);
         socket.join(room.id);
-        const roomAccessToken = grantRoomAccess(socket, room);
+        const roomAccessToken = '';
         return { room, roomAccessToken };
       });
       ackOk(callback, { room: roomManager.serializeRoom(room), roomAccessToken });
@@ -749,6 +824,7 @@ io.on('connection', (socket) => {
   socket.on('chat:global:get', (payload, callback) => {
     const done = typeof payload === 'function' ? payload : callback;
     try {
+      assertSiteOpen(socket, typeof payload === 'function' ? {} : payload);
       ackOk(done, { messages: roomManager.getGlobalMessages() });
     } catch (error) {
       ackError(done, error);
@@ -757,6 +833,7 @@ io.on('connection', (socket) => {
 
   socket.on('chat:global:send', (payload, callback) => {
     try {
+      assertSiteOpen(socket, payload);
       const message = persistStateChange(() => roomManager.addGlobalMessage({ socketId: socket.id, nickname: payload?.nickname, text: payload?.text }));
       const messages = roomManager.getGlobalMessages();
       ackOk(callback, { message, messages });
@@ -789,6 +866,7 @@ io.on('connection', (socket) => {
 
   socket.on('chat:room:get', (payload, callback) => {
     try {
+      assertSiteOpen(socket, payload);
       const room = roomManager.getRoom(payload?.roomId);
       assertRoomAccess(socket, room, payload);
       if (!room) throw new Error('Комната не найдена');
@@ -801,6 +879,7 @@ io.on('connection', (socket) => {
 
   socket.on('chat:room:send', (payload, callback) => {
     try {
+      assertSiteOpen(socket, payload);
       const room = roomManager.getRoom(payload?.roomId);
       assertRoomAccess(socket, room, payload);
       if (!room) throw new Error('Комната не найдена');
@@ -817,6 +896,7 @@ io.on('connection', (socket) => {
 
   socket.on('past:get', (payload, callback) => {
     try {
+      assertSiteOpen(socket, payload);
       ackOk(callback, { tournaments: roomManager.getPastTournaments(payload?.game) });
     } catch (error) {
       ackError(callback, error);
@@ -834,10 +914,21 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('past:edit', (payload, callback) => {
+    try {
+      const actor = requireAdmin(socket, payload);
+      const item = persistStateChange(() => roomManager.updatePastTournament(payload?.id, payload, actor, payload?.game));
+      ackOk(callback, { tournament: item, tournaments: roomManager.getPastTournaments(payload?.game) });
+      io.emit('past:update', { tournaments: roomManager.getPastTournaments(), changedGame: item.game });
+    } catch (error) {
+      ackError(callback, error);
+    }
+  });
+
   socket.on('past:delete', (payload, callback) => {
     try {
       const actor = requireAdmin(socket, payload);
-      const removed = persistStateChange(() => roomManager.deletePastTournament(payload?.id, actor));
+      const removed = persistStateChange(() => roomManager.deletePastTournament(payload?.id, actor, payload?.game));
       ackOk(callback, { tournament: removed, tournaments: roomManager.getPastTournaments(payload?.game) });
       io.emit('past:update', { tournaments: roomManager.getPastTournaments(), changedGame: removed.game });
     } catch (error) {
@@ -847,6 +938,7 @@ io.on('connection', (socket) => {
 
   socket.on('room:checkPassword', (payload, callback) => {
     try {
+      assertSiteOpen(socket, payload);
       assertRoomPasswordAllowed(socket, payload);
       const valid = roomManager.checkPassword(payload?.roomId, payload?.password);
       const room = roomManager.getRoom(payload?.roomId);
@@ -866,6 +958,7 @@ io.on('connection', (socket) => {
 
   socket.on('room:get', (payload, callback) => {
     try {
+      assertSiteOpen(socket, payload);
       const snapshot = snapshotRuntimeState();
       let room = null;
       let resumedSession = null;
@@ -883,6 +976,10 @@ io.on('connection', (socket) => {
         throw error;
       }
       ackOk(callback, { room: roomManager.serializeRoom(room), playerSessionToken: resumedSession?.token || '', roomAccessToken });
+      if (resumedSession) {
+        emitRoomState(room.id);
+        emitRoomsList();
+      }
     } catch (error) {
       ackError(callback, error);
     }
@@ -890,6 +987,7 @@ io.on('connection', (socket) => {
 
   socket.on('room:join', (payload, callback) => {
     try {
+      assertSiteOpen(socket, payload);
       const roomBeforeJoin = roomManager.getRoom(payload?.roomId);
       const skipPasswordCheck = assertRoomJoinAccess(socket, roomBeforeJoin, payload);
       const result = persistRoomChange(payload.roomId, () => {
@@ -909,6 +1007,7 @@ io.on('connection', (socket) => {
 
   socket.on('player:toggleReady', (payload, callback) => {
     try {
+      assertSiteOpen(socket, payload);
       const room = persistRoomChange(payload.roomId, () => {
         roomManager.toggleReady(payload?.roomId, socket.id);
         return roomManager.getRoom(payload.roomId);
@@ -921,6 +1020,7 @@ io.on('connection', (socket) => {
 
   socket.on('player:leaveSlot', (payload, callback) => {
     try {
+      assertSiteOpen(socket, payload);
       const room = persistRoomChange(payload.roomId, () => {
         const removedPlayer = roomManager.leavePlayer(payload?.roomId, socket.id);
         revokePlayerSessions(payload?.roomId, removedPlayer.id);
@@ -934,6 +1034,7 @@ io.on('connection', (socket) => {
 
   socket.on('player:transferCaptain', (payload, callback) => {
     try {
+      assertSiteOpen(socket, payload);
       const room = persistRoomChange(payload.roomId, () => {
         roomManager.transferCaptain(payload?.roomId, socket.id, payload?.targetPlayerId);
         return roomManager.getRoom(payload.roomId);
@@ -946,6 +1047,7 @@ io.on('connection', (socket) => {
 
   socket.on('veto:selectMap', (payload, callback) => {
     try {
+      assertSiteOpen(socket, payload);
       const room = persistRoomChange(payload.roomId, () => {
         roomManager.applyVetoAction(payload?.roomId, { socketId: socket.id, mapName: payload?.mapName });
         return roomManager.getRoom(payload.roomId);
@@ -958,8 +1060,22 @@ io.on('connection', (socket) => {
 
   socket.on('veto:startNext', (payload, callback) => {
     try {
+      assertSiteOpen(socket, payload);
       const room = persistRoomChange(payload.roomId, () => {
         roomManager.startNextVeto(payload?.roomId, socket.id);
+        return roomManager.getRoom(payload.roomId);
+      });
+      ackOk(callback, { room: roomManager.serializeRoom(room) });
+    } catch (error) {
+      ackError(callback, error);
+    }
+  });
+
+  socket.on('veto:chooseSide', (payload, callback) => {
+    try {
+      assertSiteOpen(socket, payload);
+      const room = persistRoomChange(payload.roomId, () => {
+        roomManager.chooseSide(payload?.roomId, { socketId: socket.id, round: payload?.round, side: payload?.side });
         return roomManager.getRoom(payload.roomId);
       });
       ackOk(callback, { room: roomManager.serializeRoom(room) });
@@ -985,9 +1101,11 @@ io.on('connection', (socket) => {
     try {
       const actor = requireAdmin(socket, payload);
       const room = persistRoomChange(payload.roomId, () => {
+        const before = roomManager.getRoom(payload.roomId);
+        const wasFinished = before?.stage === 'finished';
         roomManager.finishMatch(payload?.roomId, payload?.winnerTeam, true);
         const updatedRoom = roomManager.getRoom(payload.roomId);
-        roomManager.addAdminLog('match:winner', { roomId: updatedRoom.id, winner: updatedRoom.winnerName }, actor);
+        if (!wasFinished) roomManager.addAdminLog('match:winner', { roomId: updatedRoom.id, winner: updatedRoom.winnerName }, actor);
         return updatedRoom;
       });
       ackOk(callback, { room: roomManager.serializeRoom(room) });
@@ -998,6 +1116,7 @@ io.on('connection', (socket) => {
 
   socket.on('match:uploadScreenshot', (payload, callback) => {
     try {
+      assertSiteOpen(socket, payload);
       const room = roomManager.getRoom(payload.roomId);
       if (!room) throw new Error('Комната не найдена');
       assertScreenshotUploadAllowed(socket, room, payload);
