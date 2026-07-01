@@ -34,7 +34,7 @@ function productionEnv(port, overrides = {}) {
     CLIENT_URL: 'https://manalan.ru',
     DATA_DIR: path.join(os.tmpdir(), 'mana-production-test-data'),
     ADMIN_LOGIN: 'secure-admin',
-    ADMIN_PASSWORD_SALT: 'secure-salt',
+    ADMIN_PASSWORD_SALT: 'secure-admin-salt-2026',
     ADMIN_PASSWORD_HASH: NON_DEFAULT_HASH,
     ...overrides
   };
@@ -206,6 +206,38 @@ test('production startup refuses bundled admin credentials', async () => {
   assert.notEqual(result.exitCode, null, 'server kept running with default production credentials');
   assert.notEqual(result.exitCode, 0);
   assert.match(result.output, /ADMIN_PASSWORD_HASH|default admin/i);
+});
+
+test('production startup refuses deploy-template admin placeholders', async () => {
+  const port = await freePort();
+  const result = await runServerExpectExit(productionEnv(port, {
+    ADMIN_LOGIN: 'admin-manalan',
+    ADMIN_PASSWORD_SALT: 'change-this-generated-salt',
+    ADMIN_PASSWORD_HASH: 'change-this-generated-pbkdf2-hash'
+  }));
+
+  assert.notEqual(result.exitCode, null, 'server kept running with template admin placeholders');
+  assert.notEqual(result.exitCode, 0);
+  assert.match(result.output, /placeholder|ADMIN_LOGIN|ADMIN_PASSWORD_HASH/i);
+});
+
+test('production startup refuses malformed admin password hash and salt', async () => {
+  const port = await freePort();
+  const malformedHash = await runServerExpectExit(productionEnv(port, {
+    ADMIN_PASSWORD_HASH: 'not-a-hex-hash'
+  }));
+
+  assert.notEqual(malformedHash.exitCode, null, 'server kept running with malformed admin password hash');
+  assert.notEqual(malformedHash.exitCode, 0);
+  assert.match(malformedHash.output, /ADMIN_PASSWORD_HASH|64-character|hex/i);
+
+  const shortSalt = await runServerExpectExit(productionEnv(await freePort(), {
+    ADMIN_PASSWORD_SALT: 'short'
+  }));
+
+  assert.notEqual(shortSalt.exitCode, null, 'server kept running with too-short admin password salt');
+  assert.notEqual(shortSalt.exitCode, 0);
+  assert.match(shortSalt.output, /ADMIN_PASSWORD_SALT|16 characters/i);
 });
 
 test('production startup refuses wildcard CORS origins', async () => {

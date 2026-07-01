@@ -2,26 +2,27 @@
 
 ## Целевая схема
 
-MANA LAN запускается как Node.js приложение за Caddy.
+MANA LAN запускается как один Node.js backend за Caddy.
 
-- домены: `manalan.ru`, `www.manalan.ru`
-- Caddy принимает `https` и проксирует запросы на `http://127.0.0.1:3001`
+- Domain: `manalan.ru`, `www.manalan.ru`
+- Caddy принимает публичный `https` и проксирует запросы на `http://127.0.0.1:3001`
 - Node host: `127.0.0.1`
 - Node port: `3001`
-- app user: `manalan`
-- current release: `/opt/manalan/current`
-- releases: `/opt/manalan/releases`
-- persistent data: `/var/lib/manalan`
-- environment file: `/etc/manalan/manalan.env`
-- service: `manalan.service`
+- App user: `manalan`
+- Deploy user: `deploy`
+- Current release: `/opt/manalan/current`
+- Releases: `/opt/manalan/releases`
+- Persistent data: `/var/lib/manalan`
+- Environment file: `/etc/manalan/manalan.env`
+- Service: `manalan.service`
 
 GitHub Actions доставляет только release artifacts. Инфраструктуру Timeweb Cloud создает и меняет оператор.
 
 ## Что нужно подготовить
 
 - аккаунт Timeweb Cloud и локально настроенный `twc-cli`
-- VPS с Ubuntu, внешним IP и доступом по SSH
-- SSH ключ для deploy-доступа без пароля
+- VPS с Ubuntu 24.04, внешним IP и доступом по SSH
+- отдельный SSH ключ для deploy-доступа без пароля
 - DNS записи для `manalan.ru` и `www.manalan.ru`
 - открытые порты `22`, `80`, `443`
 - production env для `/etc/manalan/manalan.env`
@@ -43,52 +44,79 @@ GitHub Actions не создает VPS, firewall, домены или ключи
 
 ## 2. Настроить сервер
 
-Создайте пользователя и каталоги:
+Создайте системного пользователя приложения. Он не должен быть login-пользователем для GitHub Actions:
 
 ```bash
-adduser --system --group --home /opt/manalan manalan
-mkdir -p /opt/manalan/releases /var/lib/manalan /etc/manalan
-chown -R manalan:manalan /opt/manalan /var/lib/manalan
-chmod 750 /opt/manalan /var/lib/manalan
-chmod 750 /etc/manalan
+adduser --system --group --home /opt/manalan --shell /usr/sbin/nologin manalan
+install -d -m 0755 -o root -g manalan /opt/manalan
+install -d -m 0755 -o root -g manalan /opt/manalan/releases
+install -d -m 0755 -o root -g manalan /opt/manalan/shared
+install -d -m 0750 -o manalan -g manalan /var/lib/manalan
+install -d -m 0750 -o root -g manalan /etc/manalan
 ```
 
-Установите Node.js, npm и Caddy способом, принятым для текущего образа Ubuntu. Caddy должен слушать публичные `80` и `443`, а Node должен быть доступен только на `127.0.0.1:3001`.
+Создайте отдельного deploy-пользователя с login shell и SSH ключом для GitHub Actions:
 
-Настройте `/etc/caddy/Caddyfile`:
-
-```caddy
-manalan.ru, www.manalan.ru {
-    reverse_proxy 127.0.0.1:3001 {
-        header_up X-Forwarded-Proto {scheme}
-        header_up X-Forwarded-Host {host}
-    }
-}
+```bash
+adduser --disabled-password --gecos "" deploy
+install -d -m 0700 -o deploy -g deploy /home/deploy/.ssh
+install -m 0600 -o deploy -g deploy /dev/null /home/deploy/.ssh/authorized_keys
+nano /home/deploy/.ssh/authorized_keys
 ```
 
-Создайте `/etc/systemd/system/manalan.service`:
+`TIMEWEB_SSH_USER` должен указывать на `deploy`, не на `manalan`.
 
-```ini
-[Unit]
-Description=MANA LAN Node service
-After=network.target
+На первом этапе deploy-пользователь должен иметь sudo-доступ к release-скриптам, которые управляют `/opt/manalan`, `/var/backups/manalan` и `manalan.service`. Если используется sudoers-файл, храните его как отдельный root-owned файл:
 
-[Service]
-Type=simple
-User=manalan
-Group=manalan
-WorkingDirectory=/opt/manalan/current
-EnvironmentFile=/etc/manalan/manalan.env
-ExecStart=/usr/bin/npm start
-Restart=always
-RestartSec=5
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ReadWritePaths=/var/lib/manalan
+```bash
+visudo -f /etc/sudoers.d/manalan-deploy
+```
 
-[Install]
-WantedBy=multi-user.target
+Минимальный вариант для первого запуска:
+
+```sudoers
+deploy ALL=(root) NOPASSWD: /tmp/deploy-release.sh, /tmp/rollback-release.sh, /tmp/smoke-check.sh
+```
+
+После первого успешного deploy лучше перейти на root-owned scripts в `/usr/local/sbin` и сузить sudoers до этих путей.
+
+Установите Node.js 24:
+
+```bash
+apt-get update
+apt-get install -y ca-certificates curl gnupg
+install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+  | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" \
+  > /etc/apt/sources.list.d/nodesource.list
+apt-get update
+apt-get install -y nodejs
+node --version
+npm --version
+```
+
+`node --version` должен показать `v24.x`.
+
+Установите Caddy и включите сервис:
+
+```bash
+apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+  | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+  > /etc/apt/sources.list.d/caddy-stable.list
+apt-get update
+apt-get install -y caddy
+systemctl enable --now caddy
+```
+
+Скопируйте шаблоны из репозитория:
+
+```bash
+install -m 0644 deploy/caddy/Caddyfile /etc/caddy/Caddyfile
+install -m 0644 deploy/systemd/manalan.service /etc/systemd/system/manalan.service
+install -m 0640 -o root -g manalan deploy/env/manalan.env.example /etc/manalan/manalan.env
 ```
 
 Загрузите systemd конфигурацию:
@@ -97,7 +125,7 @@ WantedBy=multi-user.target
 systemctl daemon-reload
 systemctl enable manalan
 caddy validate --config /etc/caddy/Caddyfile
-systemctl reload caddy
+systemctl reload-or-restart caddy
 ```
 
 ## 3. Заполнить production env
@@ -110,20 +138,31 @@ systemctl reload caddy
 NODE_ENV=production
 HOST=127.0.0.1
 PORT=3001
+TRUST_PROXY=1
 CLIENT_URL=https://manalan.ru,https://www.manalan.ru
 DATA_DIR=/var/lib/manalan
-TRUST_PROXY=1
-ADMIN_LOGIN=<admin-login>
+STATE_STORE_DISABLED=0
+ADMIN_LOGIN=<private-admin-login>
 ADMIN_PASSWORD_SALT=<generated-salt>
 ADMIN_PASSWORD_HASH=<generated-hash>
 ADMIN_SESSION_TTL_MS=43200000
 ROOM_ACCESS_TTL_MS=43200000
 PLAYER_SESSION_TTL_MS=43200000
+ADMIN_LOGIN_MAX_ATTEMPTS=5
+ADMIN_LOGIN_WINDOW_MS=60000
 ROOM_PASSWORD_MAX_ATTEMPTS=5
 ROOM_PASSWORD_WINDOW_MS=60000
 BRACKET_FETCH_TIMEOUT_MS=3000
 BRACKET_CACHE_TTL_MS=60000
 ```
+
+Сгенерируйте salt/hash для admin-пароля на доверенной машине или на сервере:
+
+```bash
+node -e "const { randomBytes, pbkdf2Sync } = require('crypto'); const password = process.argv[1]; const salt = randomBytes(16).toString('hex'); const hash = pbkdf2Sync(password, salt, 120000, 32, 'sha256').toString('hex'); console.log(`ADMIN_PASSWORD_SALT=${salt}\nADMIN_PASSWORD_HASH=${hash}`);" "YOUR_STRONG_PASSWORD"
+```
+
+`ADMIN_PASSWORD_HASH` должен быть 64-символьным hex PBKDF2-SHA256 hash. Не оставляйте значения из `deploy/env/manalan.env.example`; production server откажется стартовать с template placeholders.
 
 `CLIENT_URL` должен быть задан явно: `https://manalan.ru,https://www.manalan.ru`. Постоянное состояние должно оставаться в `/var/lib/manalan`, а не в release-каталоге.
 
@@ -139,7 +178,7 @@ chmod 640 /etc/manalan/manalan.env
 В репозитории задайте secrets:
 
 - `TIMEWEB_HOST`: внешний IP или DNS имя сервера
-- `TIMEWEB_SSH_USER`: пользователь для deploy-доступа, обычно `manalan`
+- `TIMEWEB_SSH_USER`: `deploy`
 - `TIMEWEB_SSH_KEY`: приватный SSH ключ для deploy-доступа
 - `TIMEWEB_SSH_PORT`: SSH порт, обычно `22`
 
@@ -147,11 +186,12 @@ chmod 640 /etc/manalan/manalan.env
 
 ## 5. Запустить первый deploy
 
-Запустите workflow deploy из GitHub Actions или сделайте push в ветку, к которой привязан production deploy.
+Production workflow ручной: откройте GitHub Actions, выберите `Deploy Production`, нажмите `Run workflow`, оставьте public health URL `https://manalan.ru/api/health` или укажите свой.
 
 Ожидаемый результат:
 
 - artifact загружен в новый каталог внутри `/opt/manalan/releases`
+- release directory доступен service user только на чтение
 - symlink `/opt/manalan/current` указывает на новый релиз
 - `manalan.service` перезапущен через systemd
 - данные приложения остаются в `/var/lib/manalan`
@@ -180,11 +220,18 @@ Health endpoint должен отвечать успешно и использо
 
 ## Rollback
 
-Выберите предыдущий каталог релиза и переключите symlink:
+Если `deploy/scripts/rollback-release.sh` уже загружен на сервер, используйте его:
+
+```bash
+sudo /tmp/rollback-release.sh https://manalan.ru/api/health
+```
+
+Ручной rollback:
 
 ```bash
 ls -1dt /opt/manalan/releases/*
-ln -sfn /opt/manalan/releases/<previous-release> /opt/manalan/current
+ln -sfn /opt/manalan/releases/<previous-release> /opt/manalan/current.next
+mv -Tf /opt/manalan/current.next /opt/manalan/current
 systemctl restart manalan
 systemctl status manalan --no-pager
 curl -fsS https://manalan.ru/api/health
@@ -196,7 +243,7 @@ curl -fsS https://manalan.ru/api/health
 
 ```bash
 systemctl restart manalan
-systemctl reload caddy
+systemctl reload-or-restart caddy
 systemctl status manalan --no-pager
 journalctl -u manalan -n 200 --no-pager
 journalctl -u caddy -n 200 --no-pager
@@ -223,8 +270,11 @@ chmod 600 /var/backups/manalan/*
 
 - Node слушает только `127.0.0.1:3001`; публичный вход идет через Caddy.
 - `CLIENT_URL=*` нельзя использовать на production.
-- `TRUST_PROXY=1` нужен только когда Node стоит за Caddy.
+- `TRUST_PROXY=1` нужен только когда Node стоит за Caddy и слушает loopback.
+- `manalan` является service user без login shell.
+- `deploy` является SSH user для GitHub Actions и должен иметь только необходимый sudo-доступ к deploy/rollback/smoke scripts.
 - `/var/lib/manalan` принадлежит пользователю `manalan` и не зависит от release-каталогов.
+- Release directories под `/opt/manalan/releases` должны быть read-only для service user.
 - `/etc/manalan/manalan.env` не должен быть доступен всем пользователям.
 - GitHub Secrets содержат deploy-доступ, но не должны содержать Timeweb operator token.
 - Инфраструктурные действия через `twc-cli` остаются operator-run.

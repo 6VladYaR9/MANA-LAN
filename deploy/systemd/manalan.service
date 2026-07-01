@@ -19,7 +19,6 @@ PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
 ReadWritePaths=/var/lib/manalan
-ReadWritePaths=/opt/manalan
 
 [Install]
 WantedBy=multi-user.target
