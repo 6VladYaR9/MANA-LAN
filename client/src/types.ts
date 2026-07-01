@@ -1,6 +1,7 @@
 export type Team = 'A' | 'B';
 export type Stage = 'lobby' | 'veto' | 'live' | 'finished';
-export type RoomStatus = 'waiting' | 'in_progress' | 'finished';
+export type RoomSummaryStage = Stage | 'locked';
+export type RoomStatus = 'waiting' | 'in_progress' | 'finished' | 'locked';
 export type VetoActionType = 'ban' | 'pick' | 'auto_ban' | 'decider' | 'final';
 export type Club = 'ЮЗ' | 'Ленина';
 export type MatchFormat = 'BO1' | 'BO3';
@@ -141,7 +142,7 @@ export type RoomSummary = {
   matchFormat: MatchFormat;
   targetMaps: number;
   hasPassword: boolean;
-  stage: Stage;
+  stage: RoomSummaryStage;
   status: RoomStatus;
   playersCount: number;
   teamSize: number;

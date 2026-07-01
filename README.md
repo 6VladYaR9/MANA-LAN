@@ -57,4 +57,14 @@ npm run ci:install
 npm run verify
 ```
 
-`verify` runs server security tests and then builds the frontend.
+`verify` runs server security tests, builds the frontend, and runs Playwright e2e tests.
+
+## Versioning
+
+Every normal pull request must include a patch changeset:
+
+```bash
+npm run changeset
+```
+
+CI checks that the PR contains a `.changeset/*.md` file with a `patch` bump for this project. After merge to `main`, GitHub opens a version PR that bumps `package.json`, refreshes `package-lock.json`, and writes the changelog.

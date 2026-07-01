@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { parseDataImage } = require('./services/imageData');
 
 const MAP_POOL = ['Dust 2', 'Mirage', 'Inferno', 'Nuke', 'Ancient', 'Anubis', 'Vertigo'];
 const CLUBS = ['ЮЗ', 'Ленина'];
@@ -63,6 +64,39 @@ function cleanText(value, fallback) {
   return text || fallback;
 }
 
+function createPasswordRecord(password) {
+  const text = String(password || '').trim();
+  if (!text) return {};
+
+  const salt = crypto.randomBytes(16).toString('hex');
+  const iterations = 120_000;
+  return {
+    password: '',
+    passwordSalt: salt,
+    passwordHash: crypto.pbkdf2Sync(text, salt, iterations, 32, 'sha256').toString('hex'),
+    passwordIterations: iterations,
+    passwordDigest: 'sha256'
+  };
+}
+
+function verifyPasswordRecord(room, password) {
+  const text = String(password || '');
+  if (!room?.hasPassword) return true;
+
+  if (room.passwordHash && room.passwordSalt) {
+    const iterations = Number.isFinite(Number(room.passwordIterations)) ? Number(room.passwordIterations) : 120_000;
+    const digest = room.passwordDigest || 'sha256';
+    const candidate = crypto.pbkdf2Sync(text, room.passwordSalt, iterations, 32, digest).toString('hex');
+    try {
+      return crypto.timingSafeEqual(Buffer.from(candidate, 'hex'), Buffer.from(room.passwordHash, 'hex'));
+    } catch {
+      return false;
+    }
+  }
+
+  return String(room.password || '') === text;
+}
+
 function buildVetoActions(matchFormat, startingTeam) {
   // startingTeam — команда, которую выбрала монетка.
   const secondTeam = otherTeam(startingTeam);
@@ -107,6 +141,19 @@ class RoomManager {
     this.bracketStates = state.bracketStates && typeof state.bracketStates === 'object' ? state.bracketStates : {};
   }
 
+  restoreStateSnapshot(snapshot = {}) {
+    const restored = new RoomManager(snapshot);
+    this.rooms = restored.rooms;
+    this.allocatedServerIds = restored.allocatedServerIds;
+    this.globalMessages = restored.globalMessages;
+    this.adminMessages = restored.adminMessages;
+    this.adminLogs = restored.adminLogs;
+    this.chatCooldowns = restored.chatCooldowns;
+    this.maintenanceMode = restored.maintenanceMode;
+    this.pastTournaments = restored.pastTournaments;
+    this.bracketStates = restored.bracketStates;
+  }
+
   hydrateRoom(room) {
     if (!room || typeof room !== 'object' || !room.id) return null;
 
@@ -116,14 +163,24 @@ class RoomManager {
       ? room.resultScreenshots
       : (room.resultScreenshot ? [room.resultScreenshot] : []);
 
+    const legacyPassword = String(room.password || '');
+    const hasModernPassword = Boolean(room.passwordHash && room.passwordSalt);
+    const migratedPassword = !hasModernPassword && legacyPassword ? createPasswordRecord(legacyPassword) : {};
+
     return {
       ...room,
       game: normalizeGame(room.game),
       club: normalizeClub(room.club),
       matchFormat,
       targetMaps: Number.isFinite(Number(room.targetMaps)) ? Number(room.targetMaps) : (matchFormat === 'BO3' ? 3 : 1),
-      password: String(room.password || ''),
-      hasPassword: Boolean(room.hasPassword || room.password),
+      password: '',
+      passwordSalt: migratedPassword.passwordSalt || room.passwordSalt || '',
+      passwordHash: migratedPassword.passwordHash || room.passwordHash || '',
+      passwordIterations: Number.isFinite(Number(migratedPassword.passwordIterations || room.passwordIterations))
+        ? Number(migratedPassword.passwordIterations || room.passwordIterations)
+        : undefined,
+      passwordDigest: migratedPassword.passwordDigest || room.passwordDigest || '',
+      hasPassword: Boolean(room.hasPassword || legacyPassword || room.passwordHash || migratedPassword.passwordHash),
       players: Array.isArray(room.players)
         ? room.players.map((player) => ({ ...player, socketId: '', connected: false }))
         : [],
@@ -293,6 +350,7 @@ class RoomManager {
     const normalizedClub = normalizeClub(club);
     const normalizedGame = normalizeGame(game);
     const assignedServer = normalizedGame === 'cs2' ? this.allocateServer(normalizedClub) : null;
+    const passwordRecord = createPasswordRecord(password);
 
     const room = {
       id: crypto.randomUUID(),
@@ -302,7 +360,7 @@ class RoomManager {
       club: normalizedClub,
       matchFormat: normalizedFormat,
       targetMaps: normalizedFormat === 'BO3' ? 3 : 1,
-      password: String(password || ''),
+      ...passwordRecord,
       hasPassword: Boolean(String(password || '').trim()),
       stage: 'lobby',
       createdAt: Date.now(),
@@ -348,29 +406,29 @@ class RoomManager {
       return {
         id: room.id,
         game: room.game || 'cs2',
-        teamAName: room.teamAName,
-        teamBName: room.teamBName,
+        teamAName: locked ? 'Password required' : room.teamAName,
+        teamBName: locked ? 'Protected room' : room.teamBName,
         club: room.club,
         matchFormat: room.matchFormat,
         targetMaps: room.targetMaps,
         hasPassword: room.hasPassword,
-        stage: room.stage,
-        status: this.getStatus(room),
-        playersCount: room.players.length,
+        stage: locked ? 'locked' : room.stage,
+        status: locked ? 'locked' : this.getStatus(room),
+        playersCount: locked ? 0 : room.players.length,
         teamSize: room.teamSize,
         maxPlayers: room.maxPlayers,
-        selectedMap: room.selectedMaps[room.selectedMaps.length - 1]?.map || room.veto?.selectedMap || null,
-        selectedMaps: room.selectedMaps,
+        selectedMap: locked ? null : (room.selectedMaps[room.selectedMaps.length - 1]?.map || room.veto?.selectedMap || null),
+        selectedMaps: locked ? [] : room.selectedMaps,
         gameServerAddress: locked ? 'LOCKED' : room.gameServerAddress,
         gotvAddress: locked ? 'LOCKED' : room.gotvAddress,
         assignedServer: locked ? null : room.assignedServer,
-        score: room.score,
-        mapScores: this.ensureMapScores(room),
-        winnerTeam: room.winnerTeam,
-        winnerName: room.winnerName,
+        score: locked ? { A: 0, B: 0 } : room.score,
+        mapScores: locked ? [] : this.ensureMapScores(room),
+        winnerTeam: locked ? null : room.winnerTeam,
+        winnerName: locked ? '' : room.winnerName,
         resultScreenshot: locked ? null : (room.resultScreenshot || screenshots[0] || null),
         resultScreenshots: locked ? [] : screenshots,
-        finishedAt: room.finishedAt,
+        finishedAt: locked ? null : room.finishedAt,
         createdAt: room.createdAt
       };
     });
@@ -380,7 +438,7 @@ class RoomManager {
     const room = this.getRoom(roomId);
     if (!room) throw new Error('Комната не найдена');
     if (!room.hasPassword) return true;
-    return room.password === String(password || '');
+    return verifyPasswordRecord(room, password);
   }
 
   serializeRoom(room) {
@@ -816,9 +874,10 @@ class RoomManager {
   uploadResultScreenshot(roomId, dataUrl, replaceIndex = null) {
     const room = this.getRoom(roomId);
     if (!room) throw new Error('Комната не найдена');
-    const text = String(dataUrl || '');
-    if (!/^data:image\/(png|jpeg|jpg|webp);base64,/.test(text)) throw new Error('Разрешены только PNG, JPG или WEBP.');
-    if (text.length > 4_500_000) throw new Error('Скриншот слишком большой. Сожми изображение до 3-4 MB.');
+    const { dataUrl: cleanImage } = parseDataImage(dataUrl, {
+      maxBytes: 4_000_000,
+      label: 'Screenshot'
+    });
 
     const limit = room.matchFormat === 'BO3' ? 3 : 1;
     const current = Array.isArray(room.resultScreenshots)
@@ -827,14 +886,14 @@ class RoomManager {
 
     const replacement = Number.isInteger(Number(replaceIndex)) ? Number(replaceIndex) : null;
     if (replacement !== null && replacement >= 0 && replacement < current.length) {
-      current[replacement] = text;
+      current[replacement] = cleanImage;
     } else {
       if (current.length >= limit) {
         throw new Error(room.matchFormat === 'BO3'
           ? 'Для BO3 можно загрузить максимум 3 скриншота результата.'
           : 'Для BO1 можно загрузить только 1 скриншот результата.');
       }
-      current.push(text);
+      current.push(cleanImage);
     }
     room.resultScreenshots = current;
     room.resultScreenshot = current[0] || null;
@@ -882,10 +941,10 @@ class RoomManager {
   }
 
   validateChatImage(image) {
-    const text = String(image || '');
-    if (!/^data:image\/(png|jpeg|jpg|webp);base64,/.test(text)) throw new Error('В админ-чат можно прикрепить только PNG, JPG или WEBP.');
-    if (text.length > 3_500_000) throw new Error('Картинка слишком большая. Лимит примерно 3 MB.');
-    return text;
+    return parseDataImage(image, {
+      maxBytes: 3_000_000,
+      label: 'Chat image'
+    }).dataUrl;
   }
 
   getGlobalMessages() {

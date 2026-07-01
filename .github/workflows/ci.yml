@@ -12,11 +12,13 @@ jobs:
   verify:
     name: Verify
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -30,6 +32,13 @@ jobs:
 
       - name: Install dependencies
         run: npm run ci:install
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Require patch changeset
+        if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'changeset-release/')
+        run: node scripts/require-patch-changeset.mjs origin/${{ github.base_ref }}
 
       - name: Verify
         run: npm run verify

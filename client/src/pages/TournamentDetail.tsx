@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import ManaLogo from '../components/ManaLogo';
-import { socket } from '../socket';
-import type { GameType, SocketAck } from '../types';
+import { emitWithAck } from '../socketAck';
+import { safeTournamentImageSrc } from '../imageSafety';
+import type { GameType } from '../types';
 import type { PastTournament, PastTournamentPlace } from '../data/tournamentData';
 import './TournamentDetail.css';
 
@@ -29,9 +30,15 @@ export default function TournamentDetail({
 }) {
   const { tournamentId } = useParams();
   const [tournament, setTournament] = useState<PastTournament | null | undefined>(undefined);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
-    socket.emit('past:get', { game }, (response: SocketAck<{ tournaments: PastTournament[] }>) => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    setTournament(undefined);
+
+    void emitWithAck<{ tournaments: PastTournament[] }>('past:get', { game }).then((response) => {
+      if (requestIdRef.current !== requestId) return;
       if (!response.ok) {
         setTournament(null);
         return;
@@ -48,7 +55,7 @@ export default function TournamentDetail({
   const third = tournament.podium.find((place) => place.place === 3) as PastTournamentPlace;
 
   return (
-    <main className="appShell tournamentPage">
+    <main className="appShell tournamentPage" data-testid="tournament-detail-page">
       <header className="topBar">
         <ManaLogo />
         <nav className="roomNav">
@@ -68,10 +75,19 @@ export default function TournamentDetail({
       </header>
 
       <section className="tournamentBanner">
-        <img src={tournament.bannerImage} alt={tournament.title} />
+        <img
+          src={safeTournamentImageSrc(tournament.bannerImage)}
+          alt={tournament.title}
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={(event) => {
+            event.currentTarget.src = safeTournamentImageSrc(null);
+          }}
+        />
         <div>
           <span className="eyebrow">MANA HALL OF FAME · {game === 'cs2' ? 'CS2' : 'DOTA 2'}</span>
-          <h1>{tournament.title}</h1>
+          <h1 data-testid="tournament-detail-title">{tournament.title}</h1>
           <p>{tournament.date}</p>
           <b>{tournament.description}</b>
         </div>
@@ -109,7 +125,16 @@ function PodiumPlace({ data }: { data: PastTournamentPlace }) {
   return (
     <article className={`podiumPlace ${placeClass(data.place)}`}>
       <div className="teamPhotoFrame">
-        <img src={data.teamPhoto} alt={data.teamName} />
+        <img
+          src={safeTournamentImageSrc(data.teamPhoto, '/assets/teams/team-first.svg')}
+          alt={data.teamName}
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={(event) => {
+            event.currentTarget.src = safeTournamentImageSrc(null, '/assets/teams/team-first.svg');
+          }}
+        />
       </div>
       <div className="podiumBlock">
         <span>{placeTitle(data.place)}</span>

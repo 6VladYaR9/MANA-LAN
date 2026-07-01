@@ -1,6 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { socket } from '../socket';
-import type { ChatMessage, SocketAck } from '../types';
+import { emitWithAck } from '../socketAck';
+import type { ChatMessage } from '../types';
 import './FloatingChat.css';
 
 type ChatPayload = { messages: ChatMessage[] };
@@ -37,11 +38,13 @@ export default function FloatingChat({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    socket.emit(chatEvent(scope, 'get'), { adminToken }, (response: SocketAck<ChatPayload>) => {
+    void emitWithAck<ChatPayload>(chatEvent(scope, 'get'), { adminToken }).then((response) => {
       if (response.ok) {
         const nextMessages = response.messages || [];
         setMessages(nextMessages);
         setLastSeenCount(nextMessages.length);
+      } else {
+        setError(response.error);
       }
     });
 
@@ -77,10 +80,10 @@ export default function FloatingChat({
     if (!cleanText && !image) return;
 
     setError('');
-    socket.emit(
+    void emitWithAck<ChatPayload>(
       chatEvent(scope, 'send'),
-      { nickname, text: cleanText, image: scope === 'admin' ? image : '', adminToken },
-      (response: SocketAck<ChatPayload>) => {
+      { nickname, text: cleanText, image: scope === 'admin' ? image : '', adminToken }
+    ).then((response) => {
         if (!response.ok) {
           setError(response.error);
           return;
@@ -92,13 +95,12 @@ export default function FloatingChat({
         setText('');
         setImage('');
         if (fileInputRef.current) fileInputRef.current.value = '';
-      }
-    );
+      });
   };
 
   const readImage = (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setError('Можно прикрепить только изображение');
+    if (!file.type.match(/^image\/(png|jpeg|jpg|webp)$/)) {
+      setError('Можно прикрепить только PNG, JPG или WEBP.');
       return;
     }
     if (file.size > 3 * 1024 * 1024) {

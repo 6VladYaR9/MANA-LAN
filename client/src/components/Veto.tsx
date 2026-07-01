@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import CoinFlip from './CoinFlip';
-import { socket } from '../socket';
-import type { MapState, Player, Room, SocketAck, Team, VetoHistoryItem } from '../types';
+import { emitWithAck } from '../socketAck';
+import type { MapState, Player, Room, Team, VetoHistoryItem } from '../types';
 import './Veto.css';
 
 type Props = {
@@ -98,7 +98,7 @@ export default function Veto({ room, currentPlayer, onError, onRoomUpdate }: Pro
     if (!canAct) return;
     onError('');
 
-    socket.emit('veto:selectMap', { roomId: room.id, mapName }, (response: SocketAck<RoomPayload>) => {
+    void emitWithAck<RoomPayload>('veto:selectMap', { roomId: room.id, mapName }).then((response) => {
       if (!response.ok) {
         onError(response.error);
         return;
@@ -112,7 +112,7 @@ export default function Veto({ room, currentPlayer, onError, onRoomUpdate }: Pro
   const finalMapsText = room.selectedMaps.map((item) => item.map).join(' / ');
 
   return (
-    <section className="vetoPanel">
+    <section className="vetoPanel" data-testid="veto-panel">
       {showCoin && <CoinFlip winnerName={startingTeamName} winnerSide={startingSide} />}
 
       <div className="vetoHead">
@@ -163,6 +163,9 @@ export default function Veto({ room, currentPlayer, onError, onRoomUpdate }: Pro
             <button
               key={map.name}
               type="button"
+              data-testid="map-tile"
+              data-map-name={map.name}
+              data-map-status={map.status}
               disabled={disabled}
               onClick={() => selectMap(map.name)}
               className={['mapTile', map.status].join(' ')}
