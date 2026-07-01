@@ -141,7 +141,7 @@ configure_firewall() {
 main() {
   require_root
   apt-get update
-  apt-get install -y ca-certificates curl gnupg tar gzip ufw sudo
+  apt-get install -y ca-certificates curl gnupg tar gzip ufw sudo python3
   install_nodejs
   install_caddy
   create_users

@@ -51,17 +51,19 @@ jobs:
           TIMEWEB_SSH_USER: ${{ secrets.TIMEWEB_SSH_USER }}
           TIMEWEB_SSH_KEY: ${{ secrets.TIMEWEB_SSH_KEY }}
           TIMEWEB_SSH_PORT: ${{ secrets.TIMEWEB_SSH_PORT }}
+          TIMEWEB_SSH_HOST_KEY: ${{ secrets.TIMEWEB_SSH_HOST_KEY }}
           PUBLIC_URL: ${{ github.event.inputs.public_url }}
         run: |
           : "${TIMEWEB_HOST:?TIMEWEB_HOST secret is required}"
           : "${TIMEWEB_SSH_USER:?TIMEWEB_SSH_USER secret is required}"
           : "${TIMEWEB_SSH_KEY:?TIMEWEB_SSH_KEY secret is required}"
           : "${TIMEWEB_SSH_PORT:?TIMEWEB_SSH_PORT secret is required}"
+          : "${TIMEWEB_SSH_HOST_KEY:?TIMEWEB_SSH_HOST_KEY secret is required}"
           case "${PUBLIC_URL}" in
             http://*|https://*) ;;
             *) echo "public_url must start with http:// or https://" >&2; exit 1 ;;
           esac
-          if ! printf '%s' "${PUBLIC_URL}" | grep -Eq '^https?://[A-Za-z0-9._~:/?=%+-]+$'; then
+          if [[ ! "${PUBLIC_URL}" =~ ^https?://[A-Za-z0-9._~:/?=%+-]+$ ]]; then
             echo "public_url contains unsafe shell characters" >&2
             exit 1
           fi
@@ -87,11 +89,17 @@ jobs:
           TIMEWEB_SSH_KEY: ${{ secrets.TIMEWEB_SSH_KEY }}
           TIMEWEB_HOST: ${{ secrets.TIMEWEB_HOST }}
           TIMEWEB_SSH_PORT: ${{ secrets.TIMEWEB_SSH_PORT }}
+          TIMEWEB_SSH_HOST_KEY: ${{ secrets.TIMEWEB_SSH_HOST_KEY }}
         run: |
           mkdir -p ~/.ssh
           printf '%s\n' "${TIMEWEB_SSH_KEY}" > ~/.ssh/timeweb
           chmod 600 ~/.ssh/timeweb
-          ssh-keyscan -p "${TIMEWEB_SSH_PORT}" "${TIMEWEB_HOST}" >> ~/.ssh/known_hosts
+          if [[ "${TIMEWEB_SSH_PORT}" == "22" ]]; then
+            printf '%s %s\n' "${TIMEWEB_HOST}" "${TIMEWEB_SSH_HOST_KEY}" > ~/.ssh/known_hosts
+          else
+            printf '[%s]:%s %s\n' "${TIMEWEB_HOST}" "${TIMEWEB_SSH_PORT}" "${TIMEWEB_SSH_HOST_KEY}" > ~/.ssh/known_hosts
+          fi
+          chmod 600 ~/.ssh/known_hosts
 
       - name: Upload artifact
         env:
@@ -99,7 +107,9 @@ jobs:
           TIMEWEB_SSH_PORT: ${{ secrets.TIMEWEB_SSH_PORT }}
           TIMEWEB_SSH_USER: ${{ secrets.TIMEWEB_SSH_USER }}
         run: |
-          scp -i ~/.ssh/timeweb -P "${TIMEWEB_SSH_PORT}" "manalan-release-${GITHUB_SHA}.tar.gz" "${TIMEWEB_SSH_USER}@${TIMEWEB_HOST}:/tmp/manalan-release-${GITHUB_SHA}.tar.gz"
+          scp -i ~/.ssh/timeweb -P "${TIMEWEB_SSH_PORT}" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts \
+            "manalan-release-${GITHUB_SHA}.tar.gz" "${TIMEWEB_SSH_USER}@${TIMEWEB_HOST}:/tmp/manalan-release-${GITHUB_SHA}.tar.gz"
 
       - name: Deploy release
         env:
@@ -108,5 +118,11 @@ jobs:
           TIMEWEB_SSH_USER: ${{ secrets.TIMEWEB_SSH_USER }}
           PUBLIC_URL: ${{ github.event.inputs.public_url }}
         run: |
-          ssh -i ~/.ssh/timeweb -p "${TIMEWEB_SSH_PORT}" "${TIMEWEB_SSH_USER}@${TIMEWEB_HOST}" \
-            "sudo /usr/local/sbin/manalan-deploy-release --artifact /tmp/manalan-release-${GITHUB_SHA}.tar.gz --sha ${GITHUB_SHA} --public-url ${PUBLIC_URL}"
+          printf -v ARTIFACT_Q '%q' "/tmp/manalan-release-${GITHUB_SHA}.tar.gz"
+          printf -v SHA_Q '%q' "${GITHUB_SHA}"
+          printf -v PUBLIC_URL_Q '%q' "${PUBLIC_URL}"
+
+          ssh -i ~/.ssh/timeweb -p "${TIMEWEB_SSH_PORT}" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts \
+            "${TIMEWEB_SSH_USER}@${TIMEWEB_HOST}" \
+            "sudo /usr/local/sbin/manalan-deploy-release --artifact ${ARTIFACT_Q} --sha ${SHA_Q} --public-url ${PUBLIC_URL_Q}"

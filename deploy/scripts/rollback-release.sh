@@ -5,6 +5,8 @@ APP_NAME="manalan"
 APP_HOME="/opt/manalan"
 RELEASES_DIR="${APP_HOME}/releases"
 CURRENT_LINK="${APP_HOME}/current"
+RUN_DIR="/run/manalan"
+LOCK_FILE="${RUN_DIR}/deploy-release.lock"
 SMOKE_CHECK="${SMOKE_CHECK:-/usr/local/sbin/manalan-smoke-check}"
 PUBLIC_URL="${PUBLIC_URL:-${1:-https://manalan.ru/api/health}}"
 
@@ -26,17 +28,50 @@ switch_current() {
   mv -Tf "${next_link}" "${CURRENT_LINK}"
 }
 
-find_previous_release() {
-  local current="$1"
+acquire_lock() {
+  install -d -m 0750 -o root -g root "${RUN_DIR}"
+  exec 9>"${LOCK_FILE}"
+  if ! flock -n 9; then
+    printf 'Another deploy or rollback is already running.\n' >&2
+    exit 1
+  fi
+}
+
+is_sha_release_dir() {
+  local release="$1"
+  local name
+  name="$(basename "${release}")"
+  [[ "${name}" =~ ^[0-9a-fA-F]{7,40}$ ]]
+}
+
+list_release_dirs() {
   find "${RELEASES_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
     | sort -rn \
     | awk '{print $2}' \
     | while IFS= read -r release; do
-        if [[ "$(readlink -f "${release}")" != "${current}" ]]; then
+        if is_sha_release_dir "${release}"; then
           printf '%s\n' "${release}"
-          break
         fi
       done
+}
+
+find_previous_release() {
+  local current="$1"
+  local releases=()
+  mapfile -t releases < <(list_release_dirs)
+
+  local release
+  local seen_current=0
+  for release in "${releases[@]}"; do
+    if [[ "${seen_current}" -eq 1 ]]; then
+      printf '%s\n' "${release}"
+      return 0
+    fi
+
+    if [[ "$(readlink -f "${release}")" == "${current}" ]]; then
+      seen_current=1
+    fi
+  done
 }
 
 main() {
@@ -47,8 +82,7 @@ main() {
     exit 1
   fi
 
-  exec 9>"${APP_HOME}/deploy.lock"
-  flock -n 9
+  acquire_lock
 
   local current
   current="$(readlink -f "${CURRENT_LINK}")"

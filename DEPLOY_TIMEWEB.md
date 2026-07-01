@@ -26,7 +26,7 @@ GitHub Actions доставляет только release artifacts. Инфрас
 - DNS записи для `manalan.ru` и `www.manalan.ru`
 - открытые порты `22`, `80`, `443`
 - production env для `/etc/manalan/manalan.env`
-- GitHub Secrets: `TIMEWEB_HOST`, `TIMEWEB_SSH_USER`, `TIMEWEB_SSH_KEY`, `TIMEWEB_SSH_PORT`
+- GitHub Secrets: `TIMEWEB_HOST`, `TIMEWEB_SSH_USER`, `TIMEWEB_SSH_KEY`, `TIMEWEB_SSH_PORT`, `TIMEWEB_SSH_HOST_KEY`
 
 ## 1. Поднять VPS через Timeweb CLI
 
@@ -189,6 +189,7 @@ chmod 640 /etc/manalan/manalan.env
 - `TIMEWEB_SSH_USER`: `deploy`
 - `TIMEWEB_SSH_KEY`: приватный SSH ключ для deploy-доступа
 - `TIMEWEB_SSH_PORT`: SSH порт, обычно `22`
+- `TIMEWEB_SSH_HOST_KEY`: публичный SSH host key сервера в формате known_hosts без имени хоста, например `ssh-ed25519 AAAAC3...`
 
 Не сохраняйте приватные ключи, токены Timeweb или production env в git.
 
