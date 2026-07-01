@@ -1,5 +1,11 @@
 # cs2-lan-mana-veto-bracket-update
 
+## 1.5.2
+
+### Patch Changes
+
+- 3d3b8c4: Harden deep-audit edge cases across protected rooms, veto side choice, tournament archive editing, frontend accessibility, CI diagnostics, and automated regression coverage.
+
 ## 1.5.1
 
 ### Patch Changes
