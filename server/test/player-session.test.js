@@ -94,7 +94,7 @@ test('player session token restores a lobby slot after socket reconnect', async 
       teamSize: 1,
       club: 'ЮЗ',
       matchFormat: 'BO1',
-      game: 'dota2'
+      game: 'cs2'
     });
     assert.equal(created.ok, true);
 
@@ -144,7 +144,7 @@ test('stale player session tokens do not block public room reads after leaving a
       teamSize: 1,
       club: 'Р®Р—',
       matchFormat: 'BO1',
-      game: 'dota2'
+      game: 'cs2'
     });
     assert.equal(created.ok, true);
 

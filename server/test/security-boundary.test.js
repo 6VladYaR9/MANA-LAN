@@ -167,11 +167,31 @@ async function createRoom(socket, adminToken, overrides = {}) {
     teamSize: 1,
     club: 'ЮЗ',
     matchFormat: 'BO1',
-    game: 'dota2',
+    game: 'cs2',
     ...overrides
   });
   assert.equal(response.ok, true);
   return response.room;
+}
+
+async function playVetoToLive(initialRoom, socketsByTeam) {
+  let currentRoom = initialRoom;
+  for (let step = 0; step < 7 && currentRoom.stage === 'veto'; step += 1) {
+    const action = currentRoom.veto.currentAction;
+    const actor = socketsByTeam[action.team];
+    const nextMap = currentRoom.veto.maps.find((map) => map.status === 'available');
+    const selected = await emit(actor, 'veto:selectMap', { roomId: currentRoom.id, mapName: nextMap.name });
+    assert.equal(selected.ok, true);
+    currentRoom = selected.room;
+  }
+  while (currentRoom.stage === 'side_choice') {
+    const pendingMap = currentRoom.selectedMaps.find((map) => !map.side);
+    const actor = socketsByTeam[pendingMap.sideChoiceTeam];
+    const chosen = await emit(actor, 'veto:chooseSide', { roomId: currentRoom.id, round: pendingMap.round, side: 'CT' });
+    assert.equal(chosen.ok, true);
+    currentRoom = chosen.room;
+  }
+  return currentRoom;
 }
 
 test('production startup refuses bundled admin credentials', async () => {
@@ -500,7 +520,10 @@ test('failed screenshot persistence rolls back in-memory screenshots', async () 
     assert.equal((await emit(playerA, 'room:join', { roomId: room.id, name: 'A', team: 'A' })).ok, true);
     assert.equal((await emit(playerB, 'room:join', { roomId: room.id, name: 'B', team: 'B' })).ok, true);
     assert.equal((await emit(playerA, 'player:toggleReady', { roomId: room.id })).ok, true);
-    assert.equal((await emit(playerB, 'player:toggleReady', { roomId: room.id })).room.stage, 'live');
+    const readyB = await emit(playerB, 'player:toggleReady', { roomId: room.id });
+    assert.equal(readyB.ok, true);
+    const liveRoom = await playVetoToLive(readyB.room, { A: playerA, B: playerB });
+    assert.equal(liveRoom.stage, 'live');
 
     const stateFile = path.join(dataDir, 'state.json');
     fs.rmSync(stateFile, { force: true });
@@ -667,7 +690,8 @@ test('screenshots require live participant/admin access and replacements are adm
     assert.equal((await emit(playerA, 'player:toggleReady', { roomId: room.id })).ok, true);
     const readyB = await emit(playerB, 'player:toggleReady', { roomId: room.id });
     assert.equal(readyB.ok, true);
-    assert.equal(readyB.room.stage, 'live');
+    const liveRoom = await playVetoToLive(readyB.room, { A: playerA, B: playerB });
+    assert.equal(liveRoom.stage, 'live');
 
     const outsiderUpload = await emit(outsider, 'match:uploadScreenshot', { roomId: room.id, dataUrl: IMAGE });
     assert.equal(outsiderUpload.ok, false);

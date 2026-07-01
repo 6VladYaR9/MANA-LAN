@@ -45,6 +45,15 @@ export default function RoomChat({
     }
   }, [open, messages.length]);
 
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open]);
+
   const unreadCount = useMemo(() => {
     if (open) return 0;
     return Math.max(0, messages.length - lastSeenCount);
@@ -78,13 +87,13 @@ export default function RoomChat({
   return (
     <div className={`floatingChat roomFloatingChat ${open ? 'open' : ''}`}>
       {open && (
-        <section className="floatingChatWindow roomFloatingChatWindow" aria-label={`Чат комнаты ${roomChatTitle(room)}`}>
+        <section className="floatingChatWindow roomFloatingChatWindow" role="dialog" aria-modal="false" aria-label={`Чат комнаты ${roomChatTitle(room)}`}>
           <header>
             <div>
               <span>ROOM CHAT</span>
               <b>{roomChatTitle(room)}</b>
             </div>
-            <button type="button" onClick={() => setOpen(false)}>×</button>
+            <button type="button" aria-label="Закрыть чат комнаты" onClick={() => setOpen(false)}>×</button>
           </header>
 
           <div className="chatMessages">

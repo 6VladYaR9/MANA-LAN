@@ -36,19 +36,32 @@ export default function FloatingChat({
   const [image, setImage] = useState('');
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const loadRequestIdRef = useRef(0);
+  const lastUpdateAtRef = useRef(0);
 
   useEffect(() => {
-    void emitWithAck<ChatPayload>(chatEvent(scope, 'get'), { adminToken }).then((response) => {
-      if (response.ok) {
-        const nextMessages = response.messages || [];
-        setMessages(nextMessages);
-        setLastSeenCount(nextMessages.length);
-      } else {
-        setError(response.error);
-      }
-    });
+    const loadMessages = () => {
+      const requestId = loadRequestIdRef.current + 1;
+      const requestedAt = Date.now();
+      loadRequestIdRef.current = requestId;
+      void emitWithAck<ChatPayload>(chatEvent(scope, 'get'), { adminToken }).then((response) => {
+        if (loadRequestIdRef.current !== requestId || lastUpdateAtRef.current > requestedAt) return;
+        if (response.ok) {
+          const nextMessages = response.messages || [];
+          setMessages(nextMessages);
+          setLastSeenCount(nextMessages.length);
+        } else {
+          setError(response.error);
+        }
+      });
+    };
+
+    loadMessages();
+
+    const onConnect = () => loadMessages();
 
     const onUpdate = (payload: ChatPayload) => {
+      lastUpdateAtRef.current = Date.now();
       const nextMessages = payload.messages || [];
       setMessages(nextMessages);
 
@@ -57,11 +70,22 @@ export default function FloatingChat({
       }
     };
 
+    socket.on('connect', onConnect);
     socket.on(chatEvent(scope, 'update'), onUpdate);
     return () => {
+      socket.off('connect', onConnect);
       socket.off(chatEvent(scope, 'update'), onUpdate);
     };
   }, [open, scope, adminToken]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -121,13 +145,13 @@ export default function FloatingChat({
   return (
     <div className={`floatingChat ${open ? 'open' : ''} ${scope === 'admin' ? 'adminFloatingChat' : ''}`}>
       {open && (
-        <section className="floatingChatWindow" aria-label={chatTitle(scope)}>
+        <section className="floatingChatWindow" role="dialog" aria-modal="false" aria-label={chatTitle(scope)}>
           <header>
             <div>
               <span>{scope === 'admin' ? 'ADMIN CHAT' : 'GLOBAL CHAT'}</span>
               <b>{chatTitle(scope)}</b>
             </div>
-            <button type="button" onClick={() => setOpen(false)}>×</button>
+            <button type="button" aria-label="Закрыть чат" onClick={() => setOpen(false)}>×</button>
           </header>
 
           <div className="chatMessages">
@@ -145,7 +169,7 @@ export default function FloatingChat({
             ))}
           </div>
 
-          {error && <p className="chatError">{error}</p>}
+          {error && <p className="chatError" role="alert" aria-live="polite">{error}</p>}
           {image && <div className="chatAttachPreview"><img src={image} alt="Предпросмотр" /><button type="button" onClick={() => setImage('')}>Убрать</button></div>}
 
           <form className="chatForm" onSubmit={sendMessage}>

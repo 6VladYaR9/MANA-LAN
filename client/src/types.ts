@@ -1,5 +1,5 @@
 export type Team = 'A' | 'B';
-export type Stage = 'lobby' | 'veto' | 'live' | 'finished';
+export type Stage = 'lobby' | 'veto' | 'side_choice' | 'live' | 'finished';
 export type RoomSummaryStage = Stage | 'locked';
 export type RoomStatus = 'waiting' | 'in_progress' | 'finished' | 'locked';
 export type VetoActionType = 'ban' | 'pick' | 'auto_ban' | 'decider' | 'final';
@@ -81,6 +81,11 @@ export type SelectedMap = {
   pickedBy: Team | null;
   pickedByName: string;
   createdAt: number;
+  sideChoiceTeam?: Team;
+  side?: 'CT' | 'T' | null;
+  sideChosenByPlayerId?: string | null;
+  sideChosenByName?: string;
+  sideChosenAt?: number;
 };
 
 export type VetoState = {
@@ -93,6 +98,7 @@ export type VetoState = {
   history: VetoHistoryItem[];
   selectedMap: string | null;
   createdAt: number;
+  coinUnlockAt?: number;
 };
 
 export type Room = {

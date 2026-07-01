@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import ManaLogo from './ManaLogo';
+import ModalShell from './ModalShell';
 import SideOperatives from './SideOperatives';
 import { socket } from '../socket';
 import { emitWithAck, isAdminAuthError } from '../socketAck';
@@ -27,6 +28,7 @@ function statusLabel(room: RoomSummary) {
   if (room.stage === 'locked') return 'ЗАКРЫТО';
   if (room.stage === 'lobby') return 'СБОР ИГРОКОВ';
   if (room.stage === 'veto') return 'MAP VETO';
+  if (room.stage === 'side_choice') return 'ВЫБОР СТОРОНЫ';
   if (room.stage === 'live') return 'МАТЧ ИДЁТ';
   return 'МАТЧ ЗАВЕРШЁН';
 }
@@ -66,9 +68,13 @@ export default function Hub({
   const [passwordChecking, setPasswordChecking] = useState(false);
   const [deletingRoomId, setDeletingRoomId] = useState('');
   const passwordRequestIdRef = useRef(0);
+  const roomsRequestIdRef = useRef(0);
 
   useEffect(() => {
+    const requestId = roomsRequestIdRef.current + 1;
+    roomsRequestIdRef.current = requestId;
     void emitWithAck<RoomsPayload>('rooms:get').then((response) => {
+      if (roomsRequestIdRef.current !== requestId) return;
       if (response.ok) setRooms(response.rooms);
       else setError(response.error);
     });
@@ -79,6 +85,7 @@ export default function Hub({
     socket.on('rooms:update', onRoomsUpdate);
     socket.on('connect_error', onConnectError);
     return () => {
+      roomsRequestIdRef.current += 1;
       socket.off('rooms:update', onRoomsUpdate);
       socket.off('connect_error', onConnectError);
     };
@@ -144,6 +151,11 @@ export default function Hub({
     navigate(`/room/${requestRoomId}`);
   };
 
+  const closePasswordModal = () => {
+    passwordRequestIdRef.current += 1;
+    setPasswordModal(null);
+    setPasswordChecking(false);
+  };
 
   const closeRoom = (room: RoomSummary) => {
     const message = room.stage === 'finished'
@@ -252,7 +264,7 @@ export default function Hub({
           </section>
         )}
 
-        {error && <div className="errorBox">{error}</div>}
+        {error && <div className="errorBox" role="alert" aria-live="polite">{error}</div>}
 
         <RoomsBlock game={game} title="Активные матчи" rooms={activeRooms} empty="Комнат пока нет" connectToRoom={connectToRoom} closeRoom={closeRoom} isAdmin={isAdmin} />
         <RoomsBlock game={game} title="Завершённые матчи" rooms={finishedRooms} empty="Завершённых матчей пока нет" connectToRoom={connectToRoom} closeRoom={closeRoom} isAdmin={isAdmin} />
@@ -273,9 +285,8 @@ export default function Hub({
         )}
 
         {showNicknameEditor && (
-          <div className="modalBackdrop">
-            <div className="modal microModal">
-              <h2>Сменить ник</h2>
+          <ModalShell className="microModal" labelledBy="nickname-modal-title" onClose={() => setShowNicknameEditor(false)}>
+              <h2 id="nickname-modal-title">Сменить ник</h2>
               <form className="modalForm" onSubmit={saveNickname}>
                 <input
                   autoFocus
@@ -289,14 +300,12 @@ export default function Hub({
                   <button type="button" className="ghostBtn" onClick={() => setShowNicknameEditor(false)}>Отмена</button>
                 </div>
               </form>
-            </div>
-          </div>
+          </ModalShell>
         )}
 
         {passwordModal && (
-          <div className="modalBackdrop">
-            <div className="modal microModal" data-testid="room-password-modal">
-              <h2>Пароль комнаты</h2>
+          <ModalShell className="microModal" testId="room-password-modal" labelledBy="room-password-modal-title" onClose={closePasswordModal}>
+              <h2 id="room-password-modal-title">Пароль комнаты</h2>
               <form className="modalForm" onSubmit={submitRoomPassword}>
                 <input
                   data-testid="room-password-input"
@@ -307,22 +316,17 @@ export default function Hub({
                   placeholder="Введите пароль"
                   required
                 />
-                {passwordModal.error && <p className="errorText" data-testid="room-password-error">{passwordModal.error}</p>}
+                {passwordModal.error && <p className="errorText" role="alert" aria-live="polite" data-testid="room-password-error">{passwordModal.error}</p>}
                 <div className="modalActions">
                   <button type="submit" data-testid="room-password-submit" disabled={passwordChecking}>{passwordChecking ? 'Проверяю...' : 'Войти'}</button>
                   <button
                     type="button"
                     className="ghostBtn"
-                    onClick={() => {
-                      passwordRequestIdRef.current += 1;
-                      setPasswordModal(null);
-                      setPasswordChecking(false);
-                    }}
+                    onClick={closePasswordModal}
                   >Отмена</button>
                 </div>
               </form>
-            </div>
-          </div>
+          </ModalShell>
         )}
       </main>
     </>
@@ -459,14 +463,13 @@ function CreateMatchModal({
   };
 
   return (
-    <div className="modalBackdrop">
-      <div className="modal createMatchModal" data-testid="create-room-modal">
+    <ModalShell className="createMatchModal" testId="create-room-modal" labelledBy="create-room-title" onClose={onClose}>
         <div className="modalHead">
           <div>
             <span>Новый матч MANA</span>
-            <h2>Создать {game === 'cs2' ? 'CS2' : 'Dota 2'} {mode}x{mode}</h2>
+            <h2 id="create-room-title">Создать {game === 'cs2' ? 'CS2' : 'Dota 2'} {mode}x{mode}</h2>
           </div>
-          <button type="button" className="xBtn" onClick={onClose}>×</button>
+          <button type="button" className="xBtn" aria-label="Закрыть окно создания матча" onClick={onClose}>×</button>
         </div>
 
         <form className="modalForm" onSubmit={createRoom}>
@@ -510,14 +513,13 @@ function CreateMatchModal({
             />
           </label>
 
-          {localError && <p className="errorText">{localError}</p>}
+          {localError && <p className="errorText" role="alert" aria-live="polite">{localError}</p>}
 
           <div className="modalActions">
             <button type="submit" data-testid="create-room-submit" disabled={creating}>{creating ? 'Создаю...' : `Создать ${mode}x${mode}`}</button>
             <button type="button" className="ghostBtn" onClick={onClose}>Отмена</button>
           </div>
         </form>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

@@ -80,6 +80,16 @@ select {
 input:focus,
 select:focus { border-color: var(--mana-orange); }
 
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--mana-yellow);
+  outline-offset: 2px;
+}
+
 label {
   display: grid;
   gap: 7px;
@@ -224,7 +234,7 @@ p { overflow-wrap: anywhere; }
 .modalBackdrop {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: 140;
   display: grid;
   place-items: center;
   padding: 20px;
@@ -234,6 +244,8 @@ p { overflow-wrap: anywhere; }
 
 .modal {
   width: min(500px, calc(100vw - 28px));
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
   padding: 18px;
   border: 1px solid var(--line-orange);
   background:
@@ -310,7 +322,7 @@ p { overflow-wrap: anywhere; }
 button:not(.modeCard):not(.mapTile):not(.xBtn):not(.ghostBtn):not(.backButton) {
   min-height: 36px;
   padding: 0 16px;
-  background: linear-gradient(180deg, #ff5c2d, #c52307);
+  background: linear-gradient(180deg, #d83d12, #8f1b07);
   color: #fff;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 12px 24px rgba(255, 221, 40, 0.08);
 }

@@ -120,12 +120,38 @@ async function clickFirstEnabledMap(pages: Page[]) {
   throw new Error('No enabled veto map appeared for either captain');
 }
 
+async function clickFirstEnabledSideChoice(pages: Page[]) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    for (const page of pages) {
+      const sideButton = page.locator('[data-testid="choose-side-ct"]:not([disabled]), [data-testid="choose-side-t"]:not([disabled])').first();
+      if (await sideButton.count()) {
+        try {
+          await page.bringToFront();
+          await sideButton.click({ timeout: 2_000 });
+          await page.waitForTimeout(250);
+          return;
+        } catch {
+          // Side-choice ownership can move between captains after socket updates.
+        }
+      }
+    }
+    await pages[0].waitForTimeout(250);
+  }
+  throw new Error('No enabled side-choice button appeared for either captain');
+}
+
 export async function playVetoToLive(pages: Page[]) {
   await expect(pages[0].getByTestId('veto-panel')).toBeVisible({ timeout: 15_000 });
 
   for (let step = 0; step < 7; step += 1) {
     if (await pages[0].getByTestId('match-control').isVisible().catch(() => false)) return;
+    if (await pages[0].getByTestId('side-choice-panel').isVisible().catch(() => false)) break;
     await clickFirstEnabledMap(pages);
+  }
+
+  while (await pages[0].getByTestId('side-choice-panel').isVisible().catch(() => false)) {
+    await clickFirstEnabledSideChoice(pages);
   }
 
   await expect(pages[0].getByTestId('match-control')).toBeVisible({ timeout: 15_000 });

@@ -108,7 +108,7 @@ function emptyResultsForTeams(teams: RoundRobinTeam[], source: RoundRobinResults
 }
 
 function reverseScore(score: string) {
-  const parts = score.split(':').map((part) => part.trim());
+  const parts = score.split(/[:-]/).map((part) => part.trim());
   if (parts.length !== 2) return score;
   return `${parts[1]}:${parts[0]}`;
 }
@@ -363,6 +363,17 @@ export default function TournamentBracket({
   }, []);
 
   useEffect(() => {
+    if (isAdmin && adminToken) return;
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    queuedSaveRef.current = null;
+    pendingResetSeqRef.current = null;
+    setResetInFlight(false);
+  }, [isAdmin, adminToken]);
+
+  useEffect(() => {
     let cancelled = false;
     setBracketLoaded(false);
 
@@ -573,16 +584,46 @@ export default function TournamentBracket({
           {(sourceInfo || syncMessage) && <p className="muted bracketSyncStatus" data-testid="bracket-sync-status">{[sourceInfo, syncMessage].filter(Boolean).join(' · ')}</p>}
         </div>
 
-        <div className="bracketSwitches">
-          <button type="button" data-testid="bracket-tab-yuz" className={`bracketSwitch ${activeTab === 'yuz' ? 'active' : ''}`} onClick={() => changeTab('yuz')}>
+        <div className="bracketSwitches" role="tablist" aria-label="Разделы турнирной сетки">
+          <button
+            type="button"
+            id="bracket-tab-button-yuz"
+            role="tab"
+            aria-selected={activeTab === 'yuz'}
+            aria-controls="bracket-panel-yuz"
+            tabIndex={activeTab === 'yuz' ? 0 : -1}
+            data-testid="bracket-tab-yuz"
+            className={`bracketSwitch ${activeTab === 'yuz' ? 'active' : ''}`}
+            onClick={() => changeTab('yuz')}
+          >
             <span>ROUND ROBIN</span>
             <b>ЮЗ</b>
           </button>
-          <button type="button" data-testid="bracket-tab-lenina" className={`bracketSwitch ${activeTab === 'lenina' ? 'active' : ''}`} onClick={() => changeTab('lenina')}>
+          <button
+            type="button"
+            id="bracket-tab-button-lenina"
+            role="tab"
+            aria-selected={activeTab === 'lenina'}
+            aria-controls="bracket-panel-lenina"
+            tabIndex={activeTab === 'lenina' ? 0 : -1}
+            data-testid="bracket-tab-lenina"
+            className={`bracketSwitch ${activeTab === 'lenina' ? 'active' : ''}`}
+            onClick={() => changeTab('lenina')}
+          >
             <span>ROUND ROBIN</span>
             <b>ЛЕНИНА</b>
           </button>
-          <button type="button" data-testid="bracket-tab-playoff" className={`bracketSwitch ${activeTab === 'playoff' ? 'active' : ''}`} onClick={() => changeTab('playoff')}>
+          <button
+            type="button"
+            id="bracket-tab-button-playoff"
+            role="tab"
+            aria-selected={activeTab === 'playoff'}
+            aria-controls="bracket-panel-playoff"
+            tabIndex={activeTab === 'playoff' ? 0 : -1}
+            data-testid="bracket-tab-playoff"
+            className={`bracketSwitch ${activeTab === 'playoff' ? 'active' : ''}`}
+            onClick={() => changeTab('playoff')}
+          >
             <span>PLAYOFF</span>
             <b>SINGLE ELIMINATION</b>
           </button>
@@ -634,7 +675,13 @@ function RoundRobinSection({
   isAdmin: boolean;
 }) {
   return (
-    <section className="roundRobinBoard" data-testid={`round-robin-${group.key}`}>
+    <section
+      className="roundRobinBoard"
+      id={`bracket-panel-${group.key}`}
+      role="tabpanel"
+      aria-labelledby={`bracket-tab-button-${group.key}`}
+      data-testid={`round-robin-${group.key}`}
+    >
       <div className="boardTitleRow">
         <div>
           <span className="eyebrow">ГРУППОВОЙ ЭТАП · BO1</span>
@@ -681,6 +728,8 @@ function RoundRobinSection({
                           value={score}
                           placeholder="-"
                           readOnly={!isAdmin}
+                          aria-readonly={!isAdmin}
+                          tabIndex={!isAdmin ? -1 : undefined}
                           className={!isAdmin ? 'readOnlyInput' : ''}
                           onChange={(event) => isAdmin && onScoreChange(rowTeam.id, colTeam.id, event.target.value)}
                         />
@@ -738,7 +787,13 @@ function SingleEliminationSection({
   isAdmin: boolean;
 }) {
   return (
-    <section className="singleElimBoard" data-testid="playoff-board">
+    <section
+      className="singleElimBoard"
+      id="bracket-panel-playoff"
+      role="tabpanel"
+      aria-labelledby="bracket-tab-button-playoff"
+      data-testid="playoff-board"
+    >
       <div className="boardTitleRow">
         <div>
           <span className="eyebrow">PLAYOFF STAGE</span>
@@ -824,11 +879,25 @@ function MatchBox({
 }) {
   return (
     <div className={`matchBox ${disabled ? 'matchDisabled' : ''}`}>
-      <button type="button" className={`teamLine ${getRowClass('top', winner)}`} onClick={() => !disabled && onWinner('top')}>
+      <button
+        type="button"
+        className={`teamLine ${getRowClass('top', winner)}`}
+        aria-label={`Выбрать победителем ${match.top}`}
+        aria-pressed={winner === 'top'}
+        disabled={disabled}
+        onClick={() => !disabled && onWinner('top')}
+      >
         <span>{match.top}</span>
         <b>{winner ? (winner === 'top' ? 'W' : 'L') : ''}</b>
       </button>
-      <button type="button" className={`teamLine ${getRowClass('bottom', winner)}`} onClick={() => !disabled && onWinner('bottom')}>
+      <button
+        type="button"
+        className={`teamLine ${getRowClass('bottom', winner)}`}
+        aria-label={`Выбрать победителем ${match.bottom}`}
+        aria-pressed={winner === 'bottom'}
+        disabled={disabled}
+        onClick={() => !disabled && onWinner('bottom')}
+      >
         <span>{match.bottom}</span>
         <b>{winner ? (winner === 'bottom' ? 'W' : 'L') : ''}</b>
       </button>
@@ -852,12 +921,12 @@ function EditableMatchBox({
   return (
     <div className="matchBox editableMatchBox">
       <div className={`teamLine editableTeamLine ${getRowClass('top', winner)}`}>
-        <input value={match.top} readOnly={!isAdmin} onChange={(event) => isAdmin && onNameChange('top', event.target.value)} />
-        <button type="button" disabled={!isAdmin} onClick={() => onWinner('top')}>{winner ? (winner === 'top' ? 'W' : 'L') : '✓'}</button>
+        <input value={match.top} readOnly={!isAdmin} aria-readonly={!isAdmin} tabIndex={!isAdmin ? -1 : undefined} onChange={(event) => isAdmin && onNameChange('top', event.target.value)} />
+        <button type="button" aria-label={`Выбрать победителем ${match.top}`} aria-pressed={winner === 'top'} disabled={!isAdmin} onClick={() => onWinner('top')}>{winner ? (winner === 'top' ? 'W' : 'L') : '✓'}</button>
       </div>
       <div className={`teamLine editableTeamLine ${getRowClass('bottom', winner)}`}>
-        <input value={match.bottom} readOnly={!isAdmin} onChange={(event) => isAdmin && onNameChange('bottom', event.target.value)} />
-        <button type="button" disabled={!isAdmin} onClick={() => onWinner('bottom')}>{winner ? (winner === 'bottom' ? 'W' : 'L') : '✓'}</button>
+        <input value={match.bottom} readOnly={!isAdmin} aria-readonly={!isAdmin} tabIndex={!isAdmin ? -1 : undefined} onChange={(event) => isAdmin && onNameChange('bottom', event.target.value)} />
+        <button type="button" aria-label={`Выбрать победителем ${match.bottom}`} aria-pressed={winner === 'bottom'} disabled={!isAdmin} onClick={() => onWinner('bottom')}>{winner ? (winner === 'bottom' ? 'W' : 'L') : '✓'}</button>
       </div>
     </div>
   );

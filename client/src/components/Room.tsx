@@ -18,6 +18,7 @@ type RoomPasswordAck = SocketAck<{ roomAccessToken?: string }>;
 function stageLabel(stage: Stage) {
   if (stage === 'lobby') return 'СБОР ИГРОКОВ';
   if (stage === 'veto') return 'MAP VETO';
+  if (stage === 'side_choice') return 'ВЫБОР СТОРОН';
   if (stage === 'live') return 'МАТЧ ИДЁТ';
   return 'МАТЧ ЗАВЕРШЁН';
 }
@@ -296,7 +297,7 @@ export default function Room({
               <button type="submit" data-testid="direct-room-password-submit" disabled={accessChecking}>{accessChecking ? 'Проверяю...' : 'Открыть'}</button>
             </form>
           </section>
-          {error && <div className="errorBox">{error}</div>}
+          {error && <div className="errorBox" role="alert" aria-live="polite">{error}</div>}
         </main>
       </>
     );
@@ -369,7 +370,7 @@ export default function Room({
         </section>
 
         {copied && <div className="copyBox">{copied}</div>}
-        {error && <div className="errorBox">{error}</div>}
+        {error && <div className="errorBox" role="alert" aria-live="polite">{error}</div>}
 
         {lobbyCanJoin && (
           <section className="roomPanel joinPanel">
@@ -433,7 +434,7 @@ export default function Room({
           </section>
         )}
 
-        {room.game === 'cs2' && (room.stage === 'veto' || room.stage === 'live' || room.stage === 'finished') && (
+        {room.game === 'cs2' && (room.stage === 'veto' || room.stage === 'side_choice' || room.stage === 'live' || room.stage === 'finished') && (
           <Veto room={room} currentPlayer={currentPlayer} onError={setError} onRoomUpdate={setRoom} />
         )}
 

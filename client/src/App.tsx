@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import FloatingChat from './components/FloatingChat';
 import Hub from './components/Hub';
 import ManaLogo from './components/ManaLogo';
@@ -107,10 +107,6 @@ export default function App() {
     };
   }, [validateAdminToken]);
 
-  if (!nickname) {
-    return <NicknameGate onSave={saveNickname} />;
-  }
-
   return (
     <BrowserRouter>
       <AppRoutes
@@ -146,6 +142,7 @@ function AppRoutes({
   const location = useLocation();
   const isRoomPage = location.pathname.includes('/room/');
   const isAdminPage = location.pathname.startsWith('/admin');
+  const isDotaPage = location.pathname.startsWith('/dota');
   const [maintenance, setMaintenance] = useState(false);
 
   useEffect(() => {
@@ -159,9 +156,15 @@ function AppRoutes({
     };
   }, []);
 
+  if (!nickname && !isAdminPage) {
+    return <NicknameGate onSave={onNicknameChange} />;
+  }
+
   if (maintenance && !isAdmin && !isAdminPage) {
     return <TechnicalMode />;
   }
+
+  const showFloatingChats = Boolean(nickname && !isRoomPage && !isAdminPage && !isDotaPage);
 
   return (
     <>
@@ -177,12 +180,25 @@ function AppRoutes({
         <Route path="/past/:tournamentId" element={<TournamentDetail game="cs2" isAdmin={isAdmin} onAdminLogout={onAdminLogout} />} />
         <Route path="/dota/past/:tournamentId" element={<DotaDevelopment />} />
         <Route path="/admin" element={<AdminLogin isAdmin={isAdmin} adminToken={adminToken} onAdminLogin={onAdminLogin} onAdminLogout={onAdminLogout} onAdminAuthError={onAdminAuthError} />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
 
-      {!isRoomPage && <FloatingChat nickname={nickname} scope="global" />}
-      {isAdmin && <FloatingChat nickname="admin" scope="admin" adminToken={adminToken} />}
+      {showFloatingChats && <FloatingChat nickname={nickname} scope="global" />}
+      {showFloatingChats && isAdmin && <FloatingChat nickname="admin" scope="admin" adminToken={adminToken} />}
     </>
+  );
+}
+
+function NotFound() {
+  return (
+    <main className="nicknameGate technicalGate" data-testid="not-found-page">
+      <section className="loginCard">
+        <ManaLogo />
+        <h1>Страница не найдена</h1>
+        <p className="muted upper">Такого раздела нет или ссылка устарела.</p>
+        <Link className="adminLinkButton" to="/">Вернуться в CS2</Link>
+      </section>
+    </main>
   );
 }
 
@@ -250,7 +266,7 @@ function NicknameGate({ onSave }: { onSave: (nickname: string) => void }) {
           />
           <button type="submit" data-testid="nickname-submit">Войти в хаб</button>
         </form>
-        {error && <p className="errorText">{error}</p>}
+        {error && <p className="errorText" role="alert" aria-live="polite">{error}</p>}
       </section>
     </main>
   );
@@ -440,7 +456,7 @@ function AdminLogin({
           </form>
         )}
 
-        {error && <p className="errorText">{error}</p>}
+        {error && <p className="errorText" role="alert" aria-live="polite">{error}</p>}
         <Link className="adminBackLink" to="/">← Назад на сайт</Link>
       </section>
     </main>

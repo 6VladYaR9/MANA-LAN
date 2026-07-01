@@ -336,7 +336,16 @@
 }
 
 .chatAttachButton input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.chatAttachButton:focus-within {
+  outline: 2px solid var(--mana-yellow);
+  outline-offset: 2px;
 }
 
 .adminFloatingChat .chatForm {
@@ -357,7 +366,7 @@
 
 .adminFloatingChat .floatingChatButton {
   border-color: rgba(255, 221, 40, .95);
-  background: linear-gradient(180deg, #ffdd28, #8a6f00);
+  background: linear-gradient(180deg, #ffdd28, #6f5900);
   color: #111;
 }
 

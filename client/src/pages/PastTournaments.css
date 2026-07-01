@@ -27,7 +27,7 @@
 
 .pastCardsGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 16px;
 }
 
@@ -94,13 +94,24 @@
   position: relative;
 }
 
-.pastDeleteButton {
+.pastAdminActions {
   position: absolute;
   right: 10px;
   top: 10px;
   z-index: 2;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: calc(100% - 20px);
 }
 
 .pastAddButton {
   margin-top: 16px;
+}
+
+@media (max-width: 520px) {
+  .pastAdminActions {
+    left: 10px;
+  }
 }

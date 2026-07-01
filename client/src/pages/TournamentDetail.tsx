@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, Navigate, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import ManaLogo from '../components/ManaLogo';
 import { emitWithAck } from '../socketAck';
 import { safeTournamentImageSrc } from '../imageSafety';
@@ -48,7 +48,17 @@ export default function TournamentDetail({
   }, [game, tournamentId]);
 
   if (tournament === undefined) return <main className="appShell tournamentPage"><section className="emptyRooms"><p>Загрузка турнира...</p></section></main>;
-  if (!tournament) return <Navigate to="/past" replace />;
+  if (!tournament) {
+    return (
+      <main className="appShell tournamentPage" data-testid="tournament-not-found-page">
+        <section className="emptyRooms">
+          <h3>Турнир не найден</h3>
+          <p>Проверь ссылку или вернись в архив.</p>
+          <Link className="adminLinkButton" to="/past">К прошлым турнирам</Link>
+        </section>
+      </main>
+    );
+  }
 
   const first = tournament.podium.find((place) => place.place === 1) as PastTournamentPlace;
   const second = tournament.podium.find((place) => place.place === 2) as PastTournamentPlace;
