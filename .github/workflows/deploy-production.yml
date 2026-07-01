@@ -1,0 +1,112 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      public_url:
+        description: "Public health URL"
+        required: true
+        default: "https://manalan.ru/api/health"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Timeweb VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+            client/package-lock.json
+
+      - name: Install dependencies
+        run: npm run ci:install
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify
+        run: npm run verify
+
+      - name: Validate deploy inputs
+        env:
+          TIMEWEB_HOST: ${{ secrets.TIMEWEB_HOST }}
+          TIMEWEB_SSH_USER: ${{ secrets.TIMEWEB_SSH_USER }}
+          TIMEWEB_SSH_KEY: ${{ secrets.TIMEWEB_SSH_KEY }}
+          TIMEWEB_SSH_PORT: ${{ secrets.TIMEWEB_SSH_PORT }}
+          PUBLIC_URL: ${{ github.event.inputs.public_url }}
+        run: |
+          : "${TIMEWEB_HOST:?TIMEWEB_HOST secret is required}"
+          : "${TIMEWEB_SSH_USER:?TIMEWEB_SSH_USER secret is required}"
+          : "${TIMEWEB_SSH_KEY:?TIMEWEB_SSH_KEY secret is required}"
+          : "${TIMEWEB_SSH_PORT:?TIMEWEB_SSH_PORT secret is required}"
+          case "${PUBLIC_URL}" in
+            http://*|https://*) ;;
+            *) echo "public_url must start with http:// or https://" >&2; exit 1 ;;
+          esac
+          if ! printf '%s' "${PUBLIC_URL}" | grep -Eq '^https?://[A-Za-z0-9._~:/?=%+-]+$'; then
+            echo "public_url contains unsafe shell characters" >&2
+            exit 1
+          fi
+
+      - name: Build release artifact
+        run: |
+          tar \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='server/node_modules' \
+            --exclude='client/node_modules' \
+            --exclude='playwright-report' \
+            --exclude='test-results' \
+            --exclude='server/test' \
+            --exclude='client/src/test' \
+            -czf "manalan-release-${GITHUB_SHA}.tar.gz" \
+            package.json package-lock.json README.md CHANGELOG.md \
+            client/package.json client/package-lock.json client/dist \
+            server deploy
+
+      - name: Configure SSH
+        env:
+          TIMEWEB_SSH_KEY: ${{ secrets.TIMEWEB_SSH_KEY }}
+          TIMEWEB_HOST: ${{ secrets.TIMEWEB_HOST }}
+          TIMEWEB_SSH_PORT: ${{ secrets.TIMEWEB_SSH_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${TIMEWEB_SSH_KEY}" > ~/.ssh/timeweb
+          chmod 600 ~/.ssh/timeweb
+          ssh-keyscan -p "${TIMEWEB_SSH_PORT}" "${TIMEWEB_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Upload artifact
+        env:
+          TIMEWEB_HOST: ${{ secrets.TIMEWEB_HOST }}
+          TIMEWEB_SSH_PORT: ${{ secrets.TIMEWEB_SSH_PORT }}
+          TIMEWEB_SSH_USER: ${{ secrets.TIMEWEB_SSH_USER }}
+        run: |
+          scp -i ~/.ssh/timeweb -P "${TIMEWEB_SSH_PORT}" "manalan-release-${GITHUB_SHA}.tar.gz" "${TIMEWEB_SSH_USER}@${TIMEWEB_HOST}:/tmp/manalan-release-${GITHUB_SHA}.tar.gz"
+
+      - name: Deploy release
+        env:
+          TIMEWEB_HOST: ${{ secrets.TIMEWEB_HOST }}
+          TIMEWEB_SSH_PORT: ${{ secrets.TIMEWEB_SSH_PORT }}
+          TIMEWEB_SSH_USER: ${{ secrets.TIMEWEB_SSH_USER }}
+          PUBLIC_URL: ${{ github.event.inputs.public_url }}
+        run: |
+          ssh -i ~/.ssh/timeweb -p "${TIMEWEB_SSH_PORT}" "${TIMEWEB_SSH_USER}@${TIMEWEB_HOST}" \
+            "sudo /usr/local/sbin/manalan-deploy-release --artifact /tmp/manalan-release-${GITHUB_SHA}.tar.gz --sha ${GITHUB_SHA} --public-url ${PUBLIC_URL}"
