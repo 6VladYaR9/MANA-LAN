@@ -66,19 +66,27 @@ nano /home/deploy/.ssh/authorized_keys
 
 `TIMEWEB_SSH_USER` должен указывать на `deploy`, не на `manalan`.
 
-На первом этапе deploy-пользователь должен иметь sudo-доступ к release-скриптам, которые управляют `/opt/manalan`, `/var/backups/manalan` и `manalan.service`. Если используется sudoers-файл, храните его как отдельный root-owned файл:
+Deploy-пользователь должен иметь sudo-доступ только к root-owned release-скриптам, которые управляют `/opt/manalan`, `/var/backups/manalan` и `manalan.service`. Не разрешайте запуск `/tmp/*.sh` через sudo: `/tmp` доступен для записи deploy-пользователю.
+
+Скрипты деплоя после bootstrap должны лежать в `/usr/local/sbin`:
+
+```bash
+install -m 0755 -o root -g root deploy/scripts/deploy-release.sh /usr/local/sbin/manalan-deploy-release
+install -m 0755 -o root -g root deploy/scripts/rollback-release.sh /usr/local/sbin/manalan-rollback-release
+install -m 0755 -o root -g root deploy/scripts/smoke-check.sh /usr/local/sbin/manalan-smoke-check
+```
+
+Если используется sudoers-файл, храните его как отдельный root-owned файл:
 
 ```bash
 visudo -f /etc/sudoers.d/manalan-deploy
 ```
 
-Минимальный вариант для первого запуска:
+Минимальный вариант:
 
 ```sudoers
-deploy ALL=(root) NOPASSWD: /tmp/deploy-release.sh, /tmp/rollback-release.sh, /tmp/smoke-check.sh
+deploy ALL=(root) NOPASSWD: /usr/local/sbin/manalan-deploy-release, /usr/local/sbin/manalan-rollback-release, /usr/local/sbin/manalan-smoke-check
 ```
-
-После первого успешного deploy лучше перейти на root-owned scripts в `/usr/local/sbin` и сузить sudoers до этих путей.
 
 Установите Node.js 24:
 
@@ -220,10 +228,10 @@ Health endpoint должен отвечать успешно и использо
 
 ## Rollback
 
-Если `deploy/scripts/rollback-release.sh` уже загружен на сервер, используйте его:
+Если `deploy/scripts/rollback-release.sh` уже установлен bootstrap-скриптом на сервер, используйте root-owned wrapper:
 
 ```bash
-sudo /tmp/rollback-release.sh https://manalan.ru/api/health
+sudo /usr/local/sbin/manalan-rollback-release https://manalan.ru/api/health
 ```
 
 Ручной rollback:
