@@ -1,0 +1,8 @@
+manalan.ru, www.manalan.ru {
+    encode zstd gzip
+
+    reverse_proxy 127.0.0.1:3001 {
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+    }
+}
