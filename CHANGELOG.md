@@ -1,5 +1,11 @@
 # cs2-lan-mana-veto-bracket-update
 
+## 1.5.3
+
+### Patch Changes
+
+- be47930: Add production deployment scaffolding for Timeweb Cloud with systemd, Caddy, atomic releases, rollback, smoke checks, and a manual GitHub Actions deploy workflow.
+
 ## 1.5.2
 
 ### Patch Changes
